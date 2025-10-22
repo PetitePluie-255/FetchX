@@ -1,0 +1,36 @@
+{
+  "_comment": "npm 发布配置：正式版发布时将 'publish' 改为 true",
+  "git": {
+    "commitMessage": "chore: release v${version}",
+    "tagName": "v${version}",
+    "requireCleanWorkingDir": true,
+    "requireUpstream": false,
+    "requireCommits": false,
+    "addUntrackedFiles": false
+  },
+  "github": {
+    "release": true,
+    "releaseName": "Release v${version}",
+    "releaseNotes": null,
+    "draft": false,
+    "preRelease": false
+  },
+  "npm": {
+    "publish": false,
+    "access": "public"
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": "conventionalcommits",
+      "infile": "CHANGELOG.md",
+      "header": "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\nThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),\nand this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).",
+      "releaseCount": 0,
+      "skipUnstable": false
+    }
+  },
+  "hooks": {
+    "before:init": ["pnpm test", "pnpm lint", "pnpm type-check", "pnpm build"],
+    "after:bump": "pnpm build",
+    "after:release": "echo 'Release v${version} completed successfully!'"
+  }
+}

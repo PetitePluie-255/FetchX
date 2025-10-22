@@ -1,0 +1,141 @@
+# FetchX
+
+[![npm version](https://img.shields.io/npm/v/fetchx.svg)](https://www.npmjs.com/package/fetchx)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
+
+A modern, lightweight HTTP client library built on the native fetch API with an axios-like interface. Perfect for TypeScript projects that need a reliable, type-safe HTTP client.
+
+基于原生 fetch API 构建的现代化、轻量级 HTTP 客户端库，提供类似 axios 的接口。完美适用于需要可靠、类型安全的 HTTP 客户端的 TypeScript 项目。
+
+## 🌐 Language / 语言
+
+Choose your preferred language:
+
+选择您偏好的语言：
+
+### 🇺🇸 English
+
+[📖 Read English Documentation](docs/i18n/README.en.md)
+
+A modern, lightweight HTTP client library built on the native fetch API with an axios-like interface. Perfect for TypeScript projects that need a reliable, type-safe HTTP client.
+
+**Key Features:**
+
+- 🚀 Modern: Built on native fetch API, no external dependencies
+- 🔄 Axios Compatible: Easy migration from axios with familiar API
+- 🛡️ Type Safe: Full TypeScript support with comprehensive type definitions
+- 🔧 Interceptors: Powerful request/response interceptor system
+- ⏱️ Timeout Control: Built-in timeout with AbortController
+- 📦 Lightweight: Zero runtime dependencies, minimal bundle size
+
+### 🇨🇳 中文
+
+[📖 阅读中文文档](docs/i18n/README.zh.md)
+
+基于原生 fetch API 构建的现代化、轻量级 HTTP 客户端库，提供类似 axios 的接口。完美适用于需要可靠、类型安全的 HTTP 客户端的 TypeScript 项目。
+
+**主要特性:**
+
+- 🚀 现代化: 基于原生 fetch API，无外部依赖
+- 🔄 Axios 兼容: 从 axios 轻松迁移，熟悉的 API
+- 🛡️ 类型安全: 完整的 TypeScript 支持，全面的类型定义
+- 🔧 拦截器: 强大的请求/响应拦截器系统
+- ⏱️ 超时控制: 基于 AbortController 的内置超时
+- 📦 轻量级: 零运行时依赖，最小化包体积
+
+## 📦 Installation / 安装
+
+```bash
+# Using pnpm (recommended) / 使用 pnpm（推荐）
+pnpm add fetchx
+
+# Using npm / 使用 npm
+npm install fetchx
+
+# Using yarn / 使用 yarn
+yarn add fetchx
+```
+
+## 🚀 Quick Start / 快速开始
+
+```typescript
+import { createFetchX } from 'fetchx';
+
+// Create instance with configuration / 创建带配置的实例
+const api = createFetchX({
+  baseURL: 'https://api.example.com',
+  timeout: 5000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Make requests with full TypeScript support / 使用完整的 TypeScript 支持发起请求
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+const users = await api.get<User[]>('/users');
+const newUser = await api.post<User>('/users', {
+  name: 'John Doe', // 或 '张三'
+  email: 'john@example.com',
+});
+```
+
+## 🤝 Contributing / 贡献
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+我们欢迎贡献！详情请参阅我们的[贡献指南](CONTRIBUTING.md)。
+
+### Git Commit Convention / Git 提交规范
+
+This project follows the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
+
+#### Quick Start / 快速开始
+
+```bash
+# Use interactive commit (recommended) / 使用交互式提交（推荐）
+pnpm commit
+
+# Or use git commit directly / 或直接使用 git commit
+git commit -m "feat(core): add request interceptor support"
+```
+
+For detailed information, see our [Git Commit Guide](docs/GIT_COMMIT_GUIDE.md).
+
+详细信息请参阅我们的 [Git 提交指南](docs/GIT_COMMIT_GUIDE.md)。
+
+## 📄 License / 许可证
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
+
+## 🙏 Acknowledgments / 致谢
+
+- Inspired by [axios](https://github.com/axios/axios) for its excellent API design
+- Built on the modern [fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
+- Powered by [TypeScript](https://www.typescriptlang.org/) for type safety
+
+- 感谢 [axios](https://github.com/axios/axios) 提供的优秀 API 设计灵感
+- 基于现代化的 [fetch API](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API) 构建
+- 由 [TypeScript](https://www.typescriptlang.org/) 提供类型安全支持
+
+---
+
+## 📚 Documentation / 文档
+
+- [📖 English Documentation](docs/i18n/README.en.md)
+- [📖 中文文档](docs/i18n/README.zh.md)
+- [📋 API Reference](docs/API.md)
+- [💡 Examples](docs/Examples.md)
+- [🔧 Git Setup Guide](docs/GIT_SETUP.md)
+- [📝 Git Commit Guide](docs/GIT_COMMIT_GUIDE.md)
+- [🤝 Contributing Guide](CONTRIBUTING.md)
+- [📋 Changelog](CHANGELOG.md)
