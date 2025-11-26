@@ -133,6 +133,8 @@ MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
 
 - [📖 English Documentation](docs/i18n/README.en.md)
 - [📖 中文文档](docs/i18n/README.zh.md)
+- [⚡ Quick Start / 快速入门](docs/QUICK_START.md)
+- [📚 User Guide / 使用指南](docs/USER_GUIDE.md)
 - [📋 API Reference](docs/API.md)
 - [💡 Examples](docs/Examples.md)
 - [🔧 Git Setup Guide](docs/GIT_SETUP.md)
