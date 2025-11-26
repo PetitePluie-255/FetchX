@@ -113,7 +113,11 @@ export function mergeConfig(
       sourceValue !== null &&
       !Array.isArray(sourceValue)
     ) {
-      result[key] = mergeConfig(targetValue ?? {}, sourceValue);
+      result[key] = mergeConfig(
+        (targetValue as Record<string, unknown> | undefined) ??
+          ({} as Record<string, unknown>),
+        sourceValue as Record<string, unknown>
+      );
     } else {
       result[key] = sourceValue;
     }
