@@ -31,7 +31,7 @@ createFetchX(config?: FetchXConfig): FetchXInstance
 ### 示例
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // 使用默认配置
 const api = createFetchX();

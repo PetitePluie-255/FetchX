@@ -48,19 +48,19 @@ FetchX 是一个现代化的 HTTP 客户端库，它：
 
 ```bash
 # 使用 pnpm（推荐）
-pnpm add fetchx
+pnpm add @petite-pluie/fetchx
 
 # 使用 npm
-npm install fetchx
+npm install @petite-pluie/fetchx
 
 # 使用 yarn
-yarn add fetchx
+yarn add @petite-pluie/fetchx
 ```
 
 ### 第一个请求
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // 1. 创建实例
 const api = createFetchX({

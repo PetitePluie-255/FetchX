@@ -20,7 +20,7 @@
 ### 创建 API 客户端
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // 基础配置
 const api = createFetchX({

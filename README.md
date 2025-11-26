@@ -1,6 +1,6 @@
 # FetchX
 
-[![npm version](https://img.shields.io/npm/v/fetchx.svg)](https://www.npmjs.com/package/fetchx)
+[![npm version](https://img.shields.io/npm/v/@petite-pluie/fetchx.svg)](https://www.npmjs.com/package/@petite-pluie/fetchx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
 
@@ -48,19 +48,19 @@ A modern, lightweight HTTP client library built on the native fetch API with an 
 
 ```bash
 # Using pnpm (recommended) / 使用 pnpm（推荐）
-pnpm add fetchx
+pnpm add @petite-pluie/fetchx
 
 # Using npm / 使用 npm
-npm install fetchx
+npm install @petite-pluie/fetchx
 
 # Using yarn / 使用 yarn
-yarn add fetchx
+yarn add @petite-pluie/fetchx
 ```
 
 ## 🚀 Quick Start / 快速开始
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // Create instance with configuration / 创建带配置的实例
 const api = createFetchX({

@@ -1,6 +1,6 @@
 # FetchX
 
-[![npm version](https://img.shields.io/npm/v/fetchx.svg)](https://www.npmjs.com/package/fetchx)
+[![npm version](https://img.shields.io/npm/v/@petite-pluie/fetchx.svg)](https://www.npmjs.com/package/@petite-pluie/fetchx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
 
@@ -21,19 +21,19 @@ A modern, lightweight HTTP client library built on the native fetch API with an 
 
 ```bash
 # Using pnpm (recommended)
-pnpm add fetchx
+pnpm add @petite-pluie/fetchx
 
 # Using npm
-npm install fetchx
+npm install @petite-pluie/fetchx
 
 # Using yarn
-yarn add fetchx
+yarn add @petite-pluie/fetchx
 ```
 
 ## 🚀 Quick Start
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // Create instance with configuration
 const api = createFetchX({
@@ -63,7 +63,7 @@ const newUser = await api.post<User>('/users', {
 ### Creating an Instance
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
   baseURL: 'https://api.example.com',
@@ -365,7 +365,7 @@ const api = axios.create({
 });
 
 // After (FetchX)
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
   baseURL: 'https://api.example.com',
@@ -385,7 +385,7 @@ const data = await api.get('/users');
 ## 🧪 Testing
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // Mock fetch for testing
 global.fetch = jest.fn();
@@ -460,8 +460,8 @@ For detailed information, see our [Git Commit Guide](docs/GIT_COMMIT_GUIDE.md).
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/fetchx.git
-cd fetchx
+git clone https://github.com/PetitePluie-255/FetchX.git
+cd FetchX
 
 # Install dependencies
 pnpm install

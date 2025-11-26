@@ -22,8 +22,8 @@
 1. **Fork 并克隆项目**
 
    ```bash
-   git clone https://github.com/your-username/fetchx.git
-   cd fetchx
+   git clone https://github.com/PetitePluie-255/FetchX.git
+   cd FetchX
    ```
 
 2. **安装依赖**
@@ -510,9 +510,9 @@ export function createFetchX(config?: FetchXConfig): FetchXInstance {
 
 ## 联系方式
 
-- **Issues**: [GitHub Issues](https://github.com/your-username/fetchx/issues)
-- **讨论**: [GitHub Discussions](https://github.com/your-username/fetchx/discussions)
-- **邮件**: your-email@example.com
+- **Issues**: [GitHub Issues](https://github.com/PetitePluie-255/FetchX/issues)
+- **讨论**: [GitHub Discussions](https://github.com/PetitePluie-255/FetchX/discussions)
+- **邮件**: wpy@literegn.com
 
 ## 许可证
 

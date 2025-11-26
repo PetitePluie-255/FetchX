@@ -6,13 +6,13 @@
 
 ```bash
 # 使用 pnpm（推荐）
-pnpm add fetchx
+pnpm add @petite-pluie/fetchx
 
 # 或使用 npm
-npm install fetchx
+npm install @petite-pluie/fetchx
 
 # 或使用 yarn
-yarn add fetchx
+yarn add @petite-pluie/fetchx
 ```
 
 ## 🚀 第一个请求
@@ -20,7 +20,7 @@ yarn add fetchx
 ### 1. 创建 API 实例
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
   baseURL: 'https://api.example.com',
@@ -241,7 +241,7 @@ api.interceptors.response.use(
 ## 📝 完整示例
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // 1. 创建 API 实例
 const api = createFetchX({
@@ -345,8 +345,8 @@ main();
 
 ## ❓ 需要帮助？
 
-- 🐛 [报告 Bug](https://github.com/your-username/fetchx/issues)
-- 💬 [社区讨论](https://github.com/your-username/fetchx/discussions)
+- 🐛 [报告 Bug](https://github.com/PetitePluie-255/FetchX/issues)
+- 💬 [社区讨论](https://github.com/PetitePluie-255/FetchX/discussions)
 - 📖 [查看文档](./README.md)
 
 ---

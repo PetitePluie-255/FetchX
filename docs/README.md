@@ -29,13 +29,13 @@
 ### 安装
 
 ```bash
-pnpm add fetchx
+pnpm add @petite-pluie/fetchx
 ```
 
 ### 基础使用
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
   baseURL: 'https://api.example.com',
@@ -203,8 +203,8 @@ try {
 
 ## 🔗 相关链接
 
-- [GitHub 仓库](https://github.com/your-username/fetchx)
-- [npm 包](https://www.npmjs.com/package/fetchx)
+- [GitHub 仓库](https://github.com/PetitePluie-255/FetchX)
+- [npm 包](https://www.npmjs.com/package/@petite-pluie/fetchx)
 - [在线示例](https://fetchx-examples.vercel.app)
 - [API 文档](https://fetchx-docs.vercel.app)
 

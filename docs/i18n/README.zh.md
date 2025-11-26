@@ -1,6 +1,6 @@
 # FetchX
 
-[![npm version](https://img.shields.io/npm/v/fetchx.svg)](https://www.npmjs.com/package/fetchx)
+[![npm version](https://img.shields.io/npm/v/@petite-pluie/fetchx.svg)](https://www.npmjs.com/package/@petite-pluie/fetchx)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%230074c1.svg)](http://www.typescriptlang.org/)
 
@@ -21,19 +21,19 @@
 
 ```bash
 # 使用 pnpm（推荐）
-pnpm add fetchx
+pnpm add @petite-pluie/fetchx
 
 # 使用 npm
-npm install fetchx
+npm install @petite-pluie/fetchx
 
 # 使用 yarn
-yarn add fetchx
+yarn add @petite-pluie/fetchx
 ```
 
 ## 🚀 快速开始
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // 创建带配置的实例
 const api = createFetchX({
@@ -63,7 +63,7 @@ const newUser = await api.post<User>('/users', {
 ### 创建实例
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
   baseURL: 'https://api.example.com',
@@ -365,7 +365,7 @@ const api = axios.create({
 });
 
 // 之后 (FetchX)
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
   baseURL: 'https://api.example.com',
@@ -385,7 +385,7 @@ const data = await api.get('/users');
 ## 🧪 测试
 
 ```typescript
-import { createFetchX } from 'fetchx';
+import { createFetchX } from '@petite-pluie/fetchx';
 
 // 为测试模拟 fetch
 global.fetch = jest.fn();
@@ -460,8 +460,8 @@ git commit -m "feat(core): 添加请求拦截器支持"
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/fetchx.git
-cd fetchx
+git clone https://github.com/PetitePluie-255/FetchX.git
+cd FetchX
 
 # 安装依赖
 pnpm install
