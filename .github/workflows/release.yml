@@ -22,6 +22,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set git identity
+        run: |
+          git config --global user.name "petite-pluie-bot"
+          git config --global user.email "petite-pluie-bot@literegn.com"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
