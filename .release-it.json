@@ -16,7 +16,7 @@
     "preRelease": false
   },
   "npm": {
-    "publish": false,
+    "publish": true,
     "access": "public"
   },
   "plugins": {

@@ -53,7 +53,7 @@ jobs:
         run: pnpm release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # NPM_TOKEN: ${{ secrets.NPM_TOKEN }}  # 正式版发布时取消注释
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
