@@ -8,6 +8,9 @@ export default defineConfig({
       insertTypesEntry: true,
       include: ['src/**/*'],
       exclude: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
+      compilerOptions: {
+        declarationMap: false,
+      },
     }),
   ],
   build: {

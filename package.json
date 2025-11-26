@@ -1,6 +1,6 @@
 {
   "name": "@petite-pluie/fetchx",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "description": "A modern HTTP client library based on fetch API with axios-like interface",
   "type": "module",
   "main": "./dist/index.js",
