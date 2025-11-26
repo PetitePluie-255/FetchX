@@ -68,9 +68,7 @@ export class FetchX implements FetchXInstance {
     };
 
     // 执行请求拦截器
-    const processedConfig = (await this.interceptors.request.run(
-      requestConfig
-    )) as RequestOptions;
+    const processedConfig = await this.interceptors.request.run(requestConfig);
 
     // 构建完整 URL
     const fullURL = buildURL(
@@ -98,7 +96,7 @@ export class FetchX implements FetchXInstance {
       signal = newSignal;
       globalThis.setTimeout(() => {
         controller?.abort();
-      }, processedConfig.timeout as number);
+      }, processedConfig.timeout);
     }
 
     try {
