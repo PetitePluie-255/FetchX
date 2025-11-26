@@ -17,6 +17,7 @@ export interface RequestOptions extends Omit<FetchXConfig, 'baseURL'> {
   body?: unknown;
   method?: string;
   signal?: AbortSignal;
+  timeout?: number;
 }
 
 export interface FetchXResponse<T = Record<string, unknown>> {
