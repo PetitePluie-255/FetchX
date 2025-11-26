@@ -47,7 +47,10 @@
     "request",
     "interceptor"
   ],
-  "author": "",
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "PetitePluie-255",
   "license": "MIT",
   "packageManager": "pnpm@10.12.4",
   "devDependencies": {
