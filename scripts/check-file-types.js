@@ -58,6 +58,7 @@ function getStagedFiles() {
     const output = execSync('git diff --cached --name-only', {
       encoding: 'utf8',
     });
+
     return output
       .trim()
       .split('\n')
@@ -128,7 +129,7 @@ function main() {
   }
 
   const commitMessage = getCommitMessage();
-  const commitType = commitMessage.split(':')[0];
+  const commitType = commitMessage.split(':')[0].split('(')[0];
 
   if (allowedTypes.includes(commitType)) {
     console.log(`✅ 提交类型 "${commitType}" 与文件类型匹配`);
