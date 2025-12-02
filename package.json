@@ -1,14 +1,25 @@
 {
   "name": "@petite-pluie/fetchx",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "description": "A modern HTTP client library based on fetch API with axios-like interface",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PetitePluie-255/FetchX.git"
+  },
+  "homepage": "https://github.com/PetitePluie-255/FetchX#readme",
+  "bugs": {
+    "url": "https://github.com/PetitePluie-255/FetchX/issues"
+  },
+  "author": "PetitePluie-255",
+  "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "types": "./dist/index.d.ts"
     }
   },
@@ -50,8 +61,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "author": "PetitePluie-255",
-  "license": "MIT",
   "packageManager": "pnpm@10.12.4",
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",
@@ -62,9 +71,8 @@
     "@types/node": "^20.10.0",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
-    "@vitejs/plugin-react": "^4.2.0",
+    "@vitest/coverage-v8": "^1.0.0",
     "@vitest/ui": "^1.0.0",
-    "c8": "^8.0.0",
     "commitizen": "^4.3.1",
     "cz-git": "^1.12.0",
     "eslint": "^9.38.0",
