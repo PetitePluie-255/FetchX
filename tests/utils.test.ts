@@ -10,6 +10,7 @@ import {
   createFetchXError,
   mergeConfig,
   isSuccessStatus,
+  isCancel,
 } from '../src/utils';
 
 describe('Utils', () => {
@@ -117,6 +118,67 @@ describe('Utils', () => {
       expect(isSuccessStatus(300)).toBe(false);
       expect(isSuccessStatus(404)).toBe(false);
       expect(isSuccessStatus(500)).toBe(false);
+    });
+  });
+
+  describe('isCancel', () => {
+    it('should return true for FetchX ERR_CANCELED', () => {
+      const error = { code: 'ERR_CANCELED' };
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for FetchX ECONNABORTED (timeout)', () => {
+      const error = { code: 'ECONNABORTED' };
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for native AbortError', () => {
+      const error = new Error('The operation was aborted');
+      error.name = 'AbortError';
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for Axios CanceledError', () => {
+      const error = new Error('Request canceled');
+      error.name = 'CanceledError';
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for Axios __CANCEL__ flag', () => {
+      const error = { __CANCEL__: true, message: 'Canceled' };
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for errors with "cancel" in message', () => {
+      const error = new Error('Request was canceled by user');
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for errors with "abort" in message', () => {
+      const error = new Error('The request was aborted');
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return true for errors with uppercase keywords', () => {
+      const error = new Error('REQUEST CANCELED');
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return false for other errors', () => {
+      const error = new Error('Some other error');
+      expect(isCancel(error)).toBe(false);
+    });
+
+    it('should return false for network errors', () => {
+      const error = { code: 'ERR_NETWORK', message: 'Network Error' };
+      expect(isCancel(error)).toBe(false);
+    });
+
+    it('should return false for non-object values', () => {
+      expect(isCancel(null)).toBe(false);
+      expect(isCancel(undefined)).toBe(false);
+      expect(isCancel('string')).toBe(false);
+      expect(isCancel(123)).toBe(false);
     });
   });
 });

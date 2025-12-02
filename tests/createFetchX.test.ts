@@ -127,4 +127,67 @@ describe('createFetchX', () => {
       'Request failed with status 404'
     );
   });
+
+  it('should handle both timeout and user signal (timeout first)', async () => {
+    const controller = new AbortController();
+    const api = createFetchX({ timeout: 50 });
+
+    // Mock fetch to handle abort signal
+    mockFetch.mockImplementationOnce((url, options) => {
+      return new Promise((resolve, reject) => {
+        if (options?.signal) {
+          options.signal.addEventListener('abort', () => {
+            const error = new Error('Request timeout');
+            error.name = 'TimeoutError';
+            reject(error);
+          });
+        }
+      });
+    });
+
+    await expect(
+      api.get('/test', { signal: controller.signal })
+    ).rejects.toThrow('Request timeout');
+  });
+
+  it('should handle both timeout and user signal (user cancel first)', async () => {
+    const controller = new AbortController();
+    const api = createFetchX({ timeout: 5000 });
+
+    // Mock fetch to handle abort signal
+    mockFetch.mockImplementationOnce((url, options) => {
+      return new Promise((resolve, reject) => {
+        if (options?.signal) {
+          options.signal.addEventListener('abort', () => {
+            const error = new Error('Request canceled');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }
+      });
+    });
+
+    const promise = api.get('/test', { signal: controller.signal });
+
+    // 给 fetch 一点时间来设置事件监听器
+    await new Promise(resolve => setTimeout(resolve, 10));
+    controller.abort();
+
+    await expect(promise).rejects.toThrow('Request canceled');
+  });
+
+  it('should immediately reject if signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort(); // Abort before making request
+
+    const api = createFetchX();
+
+    // Should reject immediately without calling fetch
+    await expect(
+      api.get('/test', { signal: controller.signal })
+    ).rejects.toThrow('Request canceled');
+
+    // Verify fetch was never called
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });
