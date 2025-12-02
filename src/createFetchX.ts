@@ -86,17 +86,46 @@ export class FetchX implements FetchXInstance {
     const headers = new Headers(processedConfig.headers as HeadersInit);
 
     // 创建 AbortController 用于超时控制
-    let controller: AbortController | undefined;
+    const { timeout } = processedConfig;
     let { signal } = processedConfig;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    // 设置超时
-    if (processedConfig.timeout && processedConfig.timeout > 0 && !signal) {
-      controller = new AbortController();
-      const { signal: newSignal } = controller;
-      signal = newSignal;
-      globalThis.setTimeout(() => {
-        controller?.abort();
-      }, processedConfig.timeout);
+    // 立即检查 signal 是否已经 aborted（避免发起无效请求）
+    if (signal?.aborted) {
+      const abortError = createFetchXError(
+        'Request canceled',
+        processedConfig,
+        'ERR_CANCELED'
+      );
+      throw abortError;
+    }
+
+    // 如果有 timeout，我们需要创建一个新的 controller 来控制超时
+    if (timeout && timeout > 0) {
+      const controller = new AbortController();
+
+      // 如果用户提供了 signal，监听它的 abort 事件
+      if (signal) {
+        if (signal.aborted) {
+          controller.abort(signal.reason);
+        } else {
+          signal.addEventListener(
+            'abort',
+            () => {
+              controller.abort(signal?.reason);
+            },
+            { once: true }
+          );
+        }
+      }
+
+      timeoutId = globalThis.setTimeout(() => {
+        const timeoutError = new Error('Request timeout');
+        timeoutError.name = 'TimeoutError';
+        controller.abort(timeoutError);
+      }, timeout);
+
+      signal = controller.signal;
     }
 
     try {
@@ -129,11 +158,28 @@ export class FetchX implements FetchXInstance {
       return data as T;
     } catch (error) {
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          const abortError = createFetchXError(
+        // 处理超时错误
+        if (
+          error.name === 'TimeoutError' ||
+          (error.name === 'AbortError' &&
+            signal &&
+            signal.reason instanceof Error &&
+            signal.reason.name === 'TimeoutError')
+        ) {
+          const timeoutError = createFetchXError(
             'Request timeout',
             processedConfig,
             'ECONNABORTED'
+          );
+          throw timeoutError;
+        }
+
+        // 处理用户取消
+        if (error.name === 'AbortError') {
+          const abortError = createFetchXError(
+            'Request canceled',
+            processedConfig,
+            'ERR_CANCELED'
           );
           throw abortError;
         }
@@ -149,6 +195,10 @@ export class FetchX implements FetchXInstance {
       }
 
       throw error;
+    } finally {
+      if (timeoutId) {
+        globalThis.clearTimeout(timeoutId);
+      }
     }
   }
 

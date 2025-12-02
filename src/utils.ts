@@ -96,6 +96,36 @@ export function createFetchXError(
 }
 
 /**
+ * 检查是否为特殊对象（DOM/Browser API 对象等），这些对象不应该被深度合并
+ */
+function isSpecialObject(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  // 检查是否为 DOM/Browser API 对象
+  return !!(
+    value instanceof AbortSignal ||
+    value instanceof FormData ||
+    value instanceof Blob ||
+    value instanceof ArrayBuffer ||
+    value instanceof Headers ||
+    value instanceof URLSearchParams ||
+    // 检查是否有 DOM 对象的特征（有 constructor.name）
+    (typeof (value as { constructor?: { name?: string } }).constructor?.name ===
+      'string' &&
+      [
+        'AbortSignal',
+        'FormData',
+        'Blob',
+        'ArrayBuffer',
+        'Headers',
+        'URLSearchParams',
+      ].includes((value as { constructor: { name: string } }).constructor.name))
+  );
+}
+
+/**
  * 合并配置对象
  */
 export function mergeConfig(
@@ -108,7 +138,10 @@ export function mergeConfig(
     const sourceValue = source[key];
     const targetValue = result[key];
 
-    if (
+    // 如果是特殊对象，直接赋值，不进行深度合并
+    if (isSpecialObject(sourceValue)) {
+      result[key] = sourceValue;
+    } else if (
       typeof sourceValue === 'object' &&
       sourceValue !== null &&
       !Array.isArray(sourceValue)
@@ -152,4 +185,35 @@ export async function parseResponse(response: Response): Promise<unknown> {
   }
 
   return response.blob();
+}
+
+/**
+ * 检查是否为取消错误
+ * 兼容多种取消错误类型：FetchX、原生 AbortError、Axios 等
+ */
+export function isCancel(value: unknown): boolean {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const error = value as FetchXError;
+
+  // 检查多种取消标识
+  return !!(
+    // FetchX 标准错误码
+    (
+      error.code === 'ERR_CANCELED' ||
+      error.code === 'ECONNABORTED' ||
+      // 原生 AbortError
+      error.name === 'AbortError' ||
+      // Axios 兼容
+      error.name === 'CanceledError' ||
+      error.__CANCEL__ === true ||
+      // 消息关键词检测（兜底方案）
+      (error.message &&
+        typeof error.message === 'string' &&
+        (error.message.toLowerCase().includes('cancel') ||
+          error.message.toLowerCase().includes('abort')))
+    )
+  );
 }

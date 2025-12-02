@@ -4,6 +4,7 @@
  */
 
 export { createFetchX, FetchX } from './createFetchX';
+export { isCancel } from './utils';
 export type {
   FetchXConfig,
   RequestOptions,
