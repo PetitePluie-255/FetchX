@@ -31,6 +31,12 @@ export default [
         Response: 'readonly',
         AbortController: 'readonly',
         AbortSignal: 'readonly',
+        // Timer globals
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        globalThis: 'readonly',
         // Node.js globals
         process: 'readonly',
         Buffer: 'readonly',
@@ -67,8 +73,14 @@ export default [
       'prefer-destructuring': [
         'error',
         {
-          array: true,
-          object: true,
+          VariableDeclarator: {
+            array: true,
+            object: true,
+          },
+          AssignmentExpression: {
+            array: false,
+            object: false,
+          },
         },
         {
           enforceForRenamedProperties: false,
