@@ -171,7 +171,7 @@ export default defineConfig({
     allowEmptyIssuePrefix: true,
     confirmColorize: true,
     maxHeaderLength: 100,
-    maxSubjectLength: 50,
+    maxSubjectLength: 150,
     minSubjectLength: 0,
     scopeOverrides: null,
     defaultBody: '',
