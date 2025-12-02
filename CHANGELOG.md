@@ -20,6 +20,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 优化错误处理机制
 - 改进拦截器性能
 
+## [0.1.2] - 2025-12-02
+
+### Added
+
+- 🚫 **完善的请求取消机制**
+  - 新增 `isCancel()` 工具函数，兼容多种取消错误类型
+  - 支持识别 FetchX 标准错误（`ERR_CANCELED`, `ECONNABORTED`）
+  - 支持识别原生 `AbortError`
+  - 兼容 Axios 取消错误（`CanceledError`, `__CANCEL__`）
+  - 支持错误消息关键词检测（兜底方案）
+- ⚡ **性能优化**
+  - 请求前立即检查 `signal.aborted` 状态
+  - 避免发起无效的网络请求
+  - 提升请求取消响应速度
+
+- 📚 **文档完善**
+  - 新增 API 文档"请求取消"章节（约 300 行）
+  - 大幅完善 Examples.md 中的取消示例（约 500 行）
+  - 更新 QUICK_START.md 快速入门示例
+  - 新增 CANCEL_MECHANISM_IMPROVEMENTS.md 详细改进文档
+  - 新增 UPDATE_SUMMARY.md 完整更新总结
+
+### Enhanced
+
+- 🔧 **signal + timeout 组合使用**
+  - 支持同时使用 `signal` 和 `timeout`
+  - 自动协调两种取消机制
+  - 清晰区分超时和手动取消
+
+- 🎯 **错误识别增强**
+  - `isCancel()` 支持 6 种错误类型识别
+  - 不区分大小写的消息关键词匹配
+  - 完整的类型安全支持
+
+### Documentation
+
+- 📖 **API 文档更新**
+  - 详细的请求取消 API 说明
+  - `isCancel()` 函数完整文档
+  - signal + timeout 组合使用说明
+  - 多种取消场景示例
+
+- 💡 **示例代码增强**
+  - React Hook 示例（useEffect cleanup）
+  - 可重用的 `useFetch` Hook
+  - 搜索防抖 + 自动取消
+  - 手动取消按钮组件
+  - 竞态条件处理（分页）
+  - Vue 3 Composition API 示例
+  - onCancel Hook 实现方式
+
+- 📚 **文档结构优化**
+  - 更新 README.md 特性列表
+  - 更新 FetchX 设计文档项目状态
+  - 创建详细的改进说明文档
+  - 创建完整的更新总结文档
+
+### Tests
+
+- 🧪 **测试覆盖提升**
+  - 测试用例：27 个 → 42 个（+56%）
+  - 新增 `isCancel()` 测试（9 个测试用例）
+  - 新增 aborted signal 提前检查测试
+  - 新增 signal + timeout 组合测试
+  - 所有测试 100% 通过
+
+- 📊 **测试覆盖率**
+  - `createFetchX.ts`: 89.05%
+  - `interceptors.ts`: 92.43%
+  - `utils.ts`: 95.43%
+
+### Technical Details
+
+- 🔧 **核心实现**
+  - 优化 `isCancel()` 函数实现
+  - 增强 `createFetchX` 请求流程
+  - 改进 signal 状态检查逻辑
+  - 完善错误类型定义
+
+- 📦 **构建优化**
+  - 修复 TypeScript 类型错误
+  - 优化代码格式和结构
+  - 确保构建稳定性
+  - 包体积保持轻量（9.84 kB, gzip: 2.93 kB）
+
+### Migration Guide
+
+从 v0.1.1 迁移到 v0.1.2：
+
+```typescript
+// 新增：使用 isCancel 检查取消错误
+import { createFetchX, isCancel } from '@petite-pluie/fetchx';
+
+const controller = new AbortController();
+try {
+  const data = await api.get('/users', {
+    signal: controller.signal,
+  });
+} catch (error) {
+  // 新增：使用 isCancel 统一识别取消错误
+  if (isCancel(error)) {
+    console.log('请求被取消');
+  } else {
+    console.error('请求失败:', error);
+  }
+}
+
+// 新增：signal + timeout 组合使用
+const data = await api.get('/users', {
+  timeout: 5000, // 5 秒超时
+  signal: controller.signal, // 手动取消
+});
+```
+
+**向下兼容**：所有 v0.1.1 代码无需修改即可运行。
+
 ## [0.1.1] - 2024-01-XX
 
 ### Added
@@ -57,7 +173,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🎯 统一的错误处理机制
 - 🔄 自动 JSON 序列化和响应解析
 - 📝 完整的 API 文档和使用示例
-- 🧪 全面的测试覆盖（27 个测试用例）
+- 🧪 全面的测试覆盖（42 个测试用例）
 
 ### Features
 
@@ -117,8 +233,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### v0.1.x (基础阶段)
 
 - ✅ v0.1.0 - 基础功能实现
-- 🔄 v0.1.1 - 错误处理优化
-- 🔄 v0.1.2 - 性能优化
+- ✅ v0.1.1 - Git 提交规范配置
+- ✅ v0.1.2 - 请求取消机制完善
+- 🔄 v0.1.3 - 性能优化
 
 #### v0.2.x (进阶阶段)
 

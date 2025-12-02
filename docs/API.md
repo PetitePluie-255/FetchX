@@ -373,6 +373,238 @@ api.interceptors.request.use(config => {
 });
 ```
 
+## 请求取消
+
+FetchX 支持使用 `AbortController` 来取消请求，提供灵活的请求控制能力。
+
+### 基础用法
+
+```typescript
+// 创建 AbortController
+const controller = new AbortController();
+
+// 发起可取消的请求
+const promise = api.get('/users', {
+  signal: controller.signal,
+});
+
+// 取消请求
+controller.abort();
+
+// 处理取消错误
+try {
+  const data = await promise;
+} catch (error) {
+  if (isCancel(error)) {
+    console.log('请求已被取消');
+  }
+}
+```
+
+### timeout 配置
+
+FetchX 支持两种超时配置方式：
+
+#### 1. 全局 timeout
+
+```typescript
+// 所有请求默认 5 秒超时
+const api = createFetchX({
+  baseURL: 'https://api.example.com',
+  timeout: 5000,
+});
+```
+
+#### 2. 单次请求 timeout
+
+```typescript
+// 仅此请求 3 秒超时
+const data = await api.get('/users', {
+  timeout: 3000,
+});
+```
+
+### signal + timeout 组合使用
+
+当同时使用 `signal` 和 `timeout` 时，FetchX 会创建一个新的 `AbortController` 来协调两者：
+
+- **timeout 触发**：抛出 `ECONNABORTED` 错误
+- **signal 触发**：抛出 `ERR_CANCELED` 错误
+- **谁先触发谁生效**：先发生的取消原因会成为最终错误
+
+```typescript
+const controller = new AbortController();
+
+// 同时设置 timeout 和 signal
+const promise = api.get('/users', {
+  timeout: 5000, // 5 秒超时
+  signal: controller.signal, // 用户手动取消
+});
+
+// 场景 1: 用户主动取消（快于 timeout）
+setTimeout(() => controller.abort(), 1000);
+// 结果: ERR_CANCELED 错误
+
+// 场景 2: timeout 先触发
+// 等待超过 5 秒
+// 结果: ECONNABORTED 错误
+```
+
+### 已 aborted 的 signal
+
+FetchX 会在请求开始前立即检查 `signal.aborted` 状态：
+
+```typescript
+const controller = new AbortController();
+controller.abort(); // 提前 abort
+
+// 请求会立即失败，不会发起网络请求
+await api.get('/users', {
+  signal: controller.signal,
+});
+// 抛出: ERR_CANCELED 错误
+```
+
+这个优化可以避免发起无效的网络请求，提升性能。
+
+### isCancel 工具函数
+
+FetchX 提供 `isCancel` 函数来识别各种取消错误，兼容多种取消机制：
+
+```typescript
+import { isCancel } from '@petite-pluie/fetchx';
+
+try {
+  const data = await api.get('/users', { signal: controller.signal });
+} catch (error) {
+  if (isCancel(error)) {
+    // 这是一个取消错误，可以安全忽略
+    console.log('请求被取消');
+    return;
+  }
+  // 其他错误需要处理
+  console.error('请求失败:', error);
+}
+```
+
+`isCancel` 可以识别以下类型的取消错误：
+
+| 错误类型        | 识别方式                         | 来源             |
+| --------------- | -------------------------------- | ---------------- |
+| FetchX 标准错误 | `error.code === 'ERR_CANCELED'`  | FetchX 用户取消  |
+| FetchX 超时错误 | `error.code === 'ECONNABORTED'`  | FetchX timeout   |
+| 原生 AbortError | `error.name === 'AbortError'`    | 原生 fetch abort |
+| Axios 取消错误  | `error.name === 'CanceledError'` | Axios 迁移兼容   |
+| Axios 取消标识  | `error.__CANCEL__ === true`      | Axios 迁移兼容   |
+| 消息关键词      | 消息包含 'cancel' 或 'abort'     | 兜底识别         |
+
+### 取消场景示例
+
+#### 1. 组件卸载时取消
+
+```typescript
+// React 示例
+useEffect(() => {
+  const controller = new AbortController();
+
+  api
+    .get('/users', { signal: controller.signal })
+    .then(data => setUsers(data))
+    .catch(error => {
+      if (!isCancel(error)) {
+        console.error(error);
+      }
+    });
+
+  return () => controller.abort();
+}, []);
+```
+
+#### 2. 搜索防抖取消
+
+```typescript
+let currentController: AbortController | null = null;
+
+const search = async (keyword: string) => {
+  // 取消上一次搜索
+  currentController?.abort();
+
+  // 创建新的 controller
+  currentController = new AbortController();
+
+  try {
+    const results = await api.get('/search', {
+      params: { q: keyword },
+      signal: currentController.signal,
+    });
+    return results;
+  } catch (error) {
+    if (!isCancel(error)) {
+      throw error;
+    }
+  }
+};
+```
+
+#### 3. 手动取消按钮
+
+```typescript
+let controller: AbortController | null = null;
+
+const startRequest = () => {
+  controller = new AbortController();
+
+  api
+    .get('/long-running-task', {
+      signal: controller.signal,
+    })
+    .then(data => {
+      console.log('完成:', data);
+    })
+    .catch(error => {
+      if (isCancel(error)) {
+        console.log('用户取消了请求');
+      }
+    });
+};
+
+const cancelRequest = () => {
+  controller?.abort();
+};
+```
+
+### onCancel Hook（通过拦截器实现）
+
+虽然 FetchX 没有内置 `onCancel` hook，但你可以通过拦截器轻松实现：
+
+```typescript
+// 请求拦截器中添加取消监听
+api.interceptors.request.use(config => {
+  const onCancel = config.onCancel;
+
+  if (onCancel && config.signal) {
+    config.signal.addEventListener(
+      'abort',
+      () => {
+        onCancel(config);
+      },
+      { once: true }
+    );
+  }
+
+  return config;
+});
+
+// 使用示例
+api.get('/users', {
+  signal: controller.signal,
+  onCancel: config => {
+    console.log('请求被取消:', config.url);
+    // 执行清理操作
+  },
+});
+```
+
 ## 错误处理
 
 FetchX 提供统一的错误处理机制。

@@ -179,6 +179,8 @@ const uploadFile = async (file: File) => {
 ### 请求取消
 
 ```typescript
+import { createFetchX, isCancel } from '@petite-pluie/fetchx';
+
 // 创建控制器
 const controller = new AbortController();
 
@@ -194,10 +196,27 @@ controller.abort();
 try {
   const data = await promise;
 } catch (error) {
-  if (error.name === 'AbortError') {
+  if (isCancel(error)) {
     console.log('请求已取消');
+  } else {
+    console.error('请求失败:', error);
   }
 }
+```
+
+### 超时控制
+
+```typescript
+// 全局超时配置
+const api = createFetchX({
+  baseURL: 'https://api.example.com',
+  timeout: 5000, // 5 秒超时
+});
+
+// 单次请求超时
+const data = await api.get('/users', {
+  timeout: 3000, // 此请求 3 秒超时
+});
 ```
 
 ## 🔧 拦截器

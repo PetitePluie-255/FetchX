@@ -27,6 +27,9 @@ A modern, lightweight HTTP client library built on the native fetch API with an 
 - 🛡️ Type Safe: Full TypeScript support with comprehensive type definitions
 - 🔧 Interceptors: Powerful request/response interceptor system
 - ⏱️ Timeout Control: Built-in timeout with AbortController
+- 🚫 Request Cancellation: Full AbortController support with isCancel utility
+- 📊 Progress Tracking: Upload/download progress monitoring (v0.2.0+)
+- 🔌 Plugin System: Extensible plugin architecture for advanced features (v0.2.0+)
 - 📦 Lightweight: Zero runtime dependencies, minimal bundle size
 
 ### 🇨🇳 中文
@@ -42,6 +45,9 @@ A modern, lightweight HTTP client library built on the native fetch API with an 
 - 🛡️ 类型安全: 完整的 TypeScript 支持，全面的类型定义
 - 🔧 拦截器: 强大的请求/响应拦截器系统
 - ⏱️ 超时控制: 基于 AbortController 的内置超时
+- 🚫 请求取消: 完整的 AbortController 支持和 isCancel 工具函数
+- 📊 进度追踪: 上传/下载进度监控 (v0.2.0+)
+- 🔌 插件系统: 可扩展的插件架构，支持高级功能 (v0.2.0+)
 - 📦 轻量级: 零运行时依赖，最小化包体积
 
 ## 📦 Installation / 安装
@@ -60,7 +66,7 @@ yarn add @petite-pluie/fetchx
 ## 🚀 Quick Start / 快速开始
 
 ```typescript
-import { createFetchX } from '@petite-pluie/fetchx';
+import { createFetchX, isCancel } from '@petite-pluie/fetchx';
 
 // Create instance with configuration / 创建带配置的实例
 const api = createFetchX({
@@ -82,6 +88,45 @@ const users = await api.get<User[]>('/users');
 const newUser = await api.post<User>('/users', {
   name: 'John Doe', // 或 '张三'
   email: 'john@example.com',
+});
+
+// Request cancellation / 请求取消
+const controller = new AbortController();
+try {
+  const data = await api.get('/users', { signal: controller.signal });
+} catch (error) {
+  if (isCancel(error)) {
+    console.log('Request cancelled / 请求已取消');
+  }
+}
+```
+
+## 📊 Progress Tracking / 进度追踪 (v0.2.0+)
+
+```typescript
+import { createFetchX } from '@petite-pluie/fetchx';
+import { uploadProgressPlugin } from '@petite-pluie/fetchx/plugins/upload-progress';
+
+// Create instance with upload progress plugin / 创建带上传进度插件的实例
+const api = createFetchX({
+  baseURL: 'https://api.example.com',
+  plugins: [uploadProgressPlugin()],
+});
+
+// Upload with progress / 带进度的上传
+await api.post('/upload', fileData, {
+  onUploadProgress: progress => {
+    console.log(`Upload: ${progress.percentage}%`);
+    console.log(`上传: ${progress.percentage}%`);
+  },
+});
+
+// Download with progress / 带进度的下载（内置支持）
+await api.get('/large-file', {
+  onDownloadProgress: progress => {
+    console.log(`Download: ${progress.percentage}%`);
+    console.log(`下载: ${progress.percentage}%`);
+  },
 });
 ```
 
@@ -137,6 +182,7 @@ MIT 许可证 - 详情请参阅 [LICENSE](LICENSE) 文件。
 - [📚 User Guide / 使用指南](docs/USER_GUIDE.md)
 - [📋 API Reference](docs/API.md)
 - [💡 Examples](docs/Examples.md)
+- [🔌 Plugin System & Progress / 插件系统与进度追踪](docs/PLUGIN_SYSTEM_AND_PROGRESS.md) (v0.2.0+)
 - [🔧 Git Setup Guide](docs/GIT_SETUP.md)
 - [📝 Git Commit Guide](docs/GIT_COMMIT_GUIDE.md)
 - [🤝 Contributing Guide](CONTRIBUTING.md)

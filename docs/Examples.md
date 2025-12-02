@@ -459,31 +459,135 @@ await uploadFileWithProgress(file, progress => {
 ### 基础取消
 
 ```typescript
+import { createFetchX, isCancel } from '@petite-pluie/fetchx';
+
+const api = createFetchX({
+  baseURL: 'https://api.example.com',
+});
+
 // 创建 AbortController
 const controller = new AbortController();
 
-// 发起请求
+// 发起可取消的请求
 const promise = api.get('/users', {
   signal: controller.signal,
 });
 
-// 取消请求
-controller.abort();
+// 在某个时刻取消请求
+setTimeout(() => {
+  controller.abort();
+}, 1000);
 
+// 处理取消错误
 try {
   const data = await promise;
+  console.log('请求成功:', data);
 } catch (error) {
-  if (error.name === 'AbortError') {
-    console.log('Request was cancelled');
+  if (isCancel(error)) {
+    console.log('请求被取消');
+  } else {
+    console.error('请求失败:', error);
   }
 }
 ```
 
-### 超时取消
+### 使用 isCancel 工具函数
+
+FetchX 提供了 `isCancel` 工具函数来识别各种类型的取消错误：
 
 ```typescript
-// 自定义超时取消
-const requestWithTimeout = async (url: string, timeout: number = 5000) => {
+import { isCancel } from '@petite-pluie/fetchx';
+
+const fetchData = async () => {
+  const controller = new AbortController();
+
+  try {
+    const data = await api.get('/data', {
+      signal: controller.signal,
+    });
+    return data;
+  } catch (error) {
+    // isCancel 可以识别多种取消错误
+    if (isCancel(error)) {
+      // FetchX ERR_CANCELED
+      // FetchX ECONNABORTED (timeout)
+      // 原生 AbortError
+      // Axios CanceledError
+      // 或包含 'cancel'/'abort' 关键词的错误
+      console.log('请求被取消，这是预期行为');
+      return null;
+    }
+
+    // 其他错误需要处理
+    console.error('请求失败:', error);
+    throw error;
+  }
+};
+```
+
+### 超时控制
+
+#### 使用 FetchX 内置 timeout
+
+```typescript
+// 全局超时配置
+const api = createFetchX({
+  baseURL: 'https://api.example.com',
+  timeout: 5000, // 所有请求 5 秒超时
+});
+
+// 单次请求超时配置
+try {
+  const data = await api.get('/slow-endpoint', {
+    timeout: 10000, // 此请求 10 秒超时
+  });
+} catch (error) {
+  if (error.code === 'ECONNABORTED') {
+    console.log('请求超时');
+  }
+}
+```
+
+#### signal + timeout 组合使用
+
+```typescript
+const controller = new AbortController();
+
+// 同时使用 signal 和 timeout
+const promise = api.get('/users', {
+  timeout: 5000, // 5 秒超时
+  signal: controller.signal, // 手动取消能力
+});
+
+// 场景 1: 用户主动取消（在 timeout 之前）
+setTimeout(() => {
+  controller.abort(); // 抛出 ERR_CANCELED
+}, 2000);
+
+// 场景 2: 如果 5 秒后请求仍未完成
+// 自动超时，抛出 ECONNABORTED
+
+try {
+  const data = await promise;
+} catch (error) {
+  if (error.code === 'ERR_CANCELED') {
+    console.log('用户取消了请求');
+  } else if (error.code === 'ECONNABORTED') {
+    console.log('请求超时');
+  } else if (isCancel(error)) {
+    console.log('请求被取消（其他原因）');
+  }
+}
+```
+
+#### 自定义超时逻辑
+
+```typescript
+// 自定义超时取消（不使用 FetchX timeout）
+const requestWithCustomTimeout = async (
+  url: string,
+  timeout: number = 5000
+) => {
   const controller = new AbortController();
 
   const timeoutId = setTimeout(() => {
@@ -498,36 +602,80 @@ const requestWithTimeout = async (url: string, timeout: number = 5000) => {
     return response;
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error('Request timeout');
+    if (isCancel(error)) {
+      throw new Error('请求超时');
     }
     throw error;
   }
 };
+
+// 使用
+try {
+  const data = await requestWithCustomTimeout('/users', 3000);
+} catch (error) {
+  console.error(error.message); // "请求超时"
+}
 ```
+
+### 已 aborted 的 signal
+
+FetchX 会在请求开始前检查 signal 是否已经 aborted：
+
+```typescript
+const controller = new AbortController();
+
+// 提前 abort
+controller.abort();
+
+// 请求会立即失败，不会发起网络请求
+try {
+  await api.get('/users', {
+    signal: controller.signal,
+  });
+} catch (error) {
+  console.log(error.code); // "ERR_CANCELED"
+  console.log(isCancel(error)); // true
+}
+```
+
+这个优化避免了发起无效的网络请求，提升了性能。
 
 ### 组件卸载时取消请求
 
+#### React Hook 示例
+
 ```typescript
-// React 示例
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { isCancel } from '@petite-pluie/fetchx';
 
 const UserList = () => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const abortControllerRef = useRef<AbortController>();
 
   useEffect(() => {
     const fetchUsers = async () => {
+      // 创建新的 AbortController
       abortControllerRef.current = new AbortController();
 
+      setLoading(true);
+      setError(null);
+
       try {
-        const users = await api.get('/users', {
+        const data = await api.get('/users', {
           signal: abortControllerRef.current.signal,
         });
-        // 处理用户数据
+        setUsers(data);
       } catch (error) {
-        if (error.name !== 'AbortError') {
-          console.error('Failed to fetch users:', error);
+        // 使用 isCancel 检查是否为取消错误
+        if (!isCancel(error)) {
+          // 只有非取消错误才需要显示给用户
+          console.error('获取用户失败:', error);
+          setError(error.message);
         }
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -539,7 +687,380 @@ const UserList = () => {
     };
   }, []);
 
-  return <div>User List</div>;
+  if (loading) return <div>加载中...</div>;
+  if (error) return <div>错误: {error}</div>;
+
+  return (
+    <ul>
+      {users.map(user => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+};
+```
+
+#### 可重用的 Hook
+
+```typescript
+import { useState, useEffect, useRef } from 'react';
+import { isCancel } from '@petite-pluie/fetchx';
+
+/**
+ * 支持取消的数据获取 Hook
+ */
+export const useFetch = <T>(
+  url: string,
+  options?: any
+) => {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const abortControllerRef = useRef<AbortController>();
+
+  const fetchData = async () => {
+    // 取消之前的请求
+    abortControllerRef.current?.abort();
+
+    // 创建新的 controller
+    abortControllerRef.current = new AbortController();
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await api.get<T>(url, {
+        ...options,
+        signal: abortControllerRef.current.signal,
+      });
+      setData(result);
+    } catch (err) {
+      if (!isCancel(err)) {
+        setError(err as Error);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [url]);
+
+  return {
+    data,
+    loading,
+    error,
+    refetch: fetchData
+  };
+};
+
+// 使用示例
+const UserProfile = ({ userId }: { userId: number }) => {
+  const { data: user, loading, error } = useFetch<User>(
+    `/users/${userId}`
+  );
+
+  if (loading) return <div>加载中...</div>;
+  if (error) return <div>错误: {error.message}</div>;
+  if (!user) return null;
+
+  return <div>{user.name}</div>;
+};
+```
+
+### 搜索防抖 + 自动取消
+
+```typescript
+import { useState, useCallback, useRef } from 'react';
+import { isCancel } from '@petite-pluie/fetchx';
+
+const SearchBox = () => {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const controllerRef = useRef<AbortController>();
+
+  const search = useCallback(async (keyword: string) => {
+    if (!keyword.trim()) {
+      setResults([]);
+      return;
+    }
+
+    // 取消上一次搜索
+    controllerRef.current?.abort();
+
+    // 创建新的 controller
+    controllerRef.current = new AbortController();
+
+    setLoading(true);
+
+    try {
+      const data = await api.get('/search', {
+        params: { q: keyword },
+        signal: controllerRef.current.signal,
+      });
+      setResults(data);
+    } catch (error) {
+      if (!isCancel(error)) {
+        console.error('搜索失败:', error);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setQuery(value);
+
+    // 使用防抖
+    const timeoutId = setTimeout(() => {
+      search(value);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  };
+
+  return (
+    <div>
+      <input
+        type="text"
+        value={query}
+        onChange={handleChange}
+        placeholder="搜索..."
+      />
+      {loading && <div>搜索中...</div>}
+      <ul>
+        {results.map(result => (
+          <li key={result.id}>{result.title}</li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+```
+
+### 手动取消按钮
+
+```typescript
+import { useState, useRef } from 'react';
+import { isCancel } from '@petite-pluie/fetchx';
+
+const LongRunningTask = () => {
+  const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'cancelled'>('idle');
+  const [result, setResult] = useState(null);
+  const controllerRef = useRef<AbortController>();
+
+  const startTask = async () => {
+    controllerRef.current = new AbortController();
+    setStatus('running');
+    setResult(null);
+
+    try {
+      const data = await api.get('/long-running-task', {
+        signal: controllerRef.current.signal,
+        timeout: 60000, // 60 秒超时
+      });
+
+      setResult(data);
+      setStatus('completed');
+    } catch (error) {
+      if (isCancel(error)) {
+        setStatus('cancelled');
+        console.log('任务被取消');
+      } else {
+        setStatus('idle');
+        console.error('任务失败:', error);
+      }
+    }
+  };
+
+  const cancelTask = () => {
+    controllerRef.current?.abort();
+  };
+
+  return (
+    <div>
+      <h2>长时间运行的任务</h2>
+      <div>状态: {status}</div>
+
+      {status === 'idle' && (
+        <button onClick={startTask}>开始任务</button>
+      )}
+
+      {status === 'running' && (
+        <>
+          <div>任务进行中...</div>
+          <button onClick={cancelTask}>取消任务</button>
+        </>
+      )}
+
+      {status === 'completed' && (
+        <div>任务完成: {JSON.stringify(result)}</div>
+      )}
+
+      {status === 'cancelled' && (
+        <div>任务已取消</div>
+      )}
+    </div>
+  );
+};
+```
+
+### 竞态条件处理
+
+```typescript
+import { useState, useEffect } from 'react';
+import { isCancel } from '@petite-pluie/fetchx';
+
+/**
+ * 处理快速切换页面时的竞态条件
+ */
+const PaginatedList = () => {
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchPage = async () => {
+      setLoading(true);
+
+      try {
+        const result = await api.get('/items', {
+          params: { page },
+          signal: controller.signal,
+        });
+
+        // 只有当前页面的数据才会被设置
+        setData(result);
+      } catch (error) {
+        if (!isCancel(error)) {
+          console.error('加载失败:', error);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPage();
+
+    // 当 page 变化时，取消之前的请求
+    return () => {
+      controller.abort();
+    };
+  }, [page]);
+
+  return (
+    <div>
+      {loading && <div>加载中...</div>}
+      <ul>
+        {data.map(item => (
+          <li key={item.id}>{item.name}</li>
+        ))}
+      </ul>
+      <button onClick={() => setPage(p => p - 1)} disabled={page === 1}>
+        上一页
+      </button>
+      <span>第 {page} 页</span>
+      <button onClick={() => setPage(p => p + 1)}>
+        下一页
+      </button>
+    </div>
+  );
+};
+```
+
+### onCancel Hook 实现
+
+虽然 FetchX 没有内置 `onCancel`，但可以通过拦截器轻松实现：
+
+```typescript
+// 在应用初始化时设置
+api.interceptors.request.use(config => {
+  const onCancel = config.onCancel;
+
+  if (onCancel && config.signal) {
+    config.signal.addEventListener(
+      'abort',
+      () => {
+        onCancel(config);
+      },
+      { once: true }
+    );
+  }
+
+  return config;
+});
+
+// 使用示例
+const controller = new AbortController();
+
+api.get('/users', {
+  signal: controller.signal,
+  onCancel: config => {
+    console.log('请求被取消:', config.url);
+    // 执行清理操作
+    // 例如：清理 UI 状态、记录日志等
+  },
+});
+
+// 取消时会触发 onCancel 回调
+controller.abort();
+```
+
+### Vue 3 示例
+
+```typescript
+import { ref, onUnmounted, watchEffect } from 'vue';
+import { isCancel } from '@petite-pluie/fetchx';
+
+export const useApi = <T>(url: string, options?: any) => {
+  const data = ref<T | null>(null);
+  const loading = ref(false);
+  const error = ref<Error | null>(null);
+  let controller: AbortController | null = null;
+
+  const fetchData = async () => {
+    // 取消之前的请求
+    controller?.abort();
+
+    controller = new AbortController();
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const result = await api.get<T>(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      data.value = result;
+    } catch (err) {
+      if (!isCancel(err)) {
+        error.value = err as Error;
+      }
+    } finally {
+      loading.value = false;
+    }
+  };
+
+  // 组件卸载时取消请求
+  onUnmounted(() => {
+    controller?.abort();
+  });
+
+  // 自动执行
+  watchEffect(() => {
+    fetchData();
+  });
+
+  return { data, loading, error, refetch: fetchData };
 };
 ```
 
