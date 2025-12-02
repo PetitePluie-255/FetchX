@@ -34,6 +34,7 @@ export interface FetchXError extends Error {
   request?: unknown;
   response?: FetchXResponse;
   isAxiosError?: boolean;
+  __CANCEL__?: boolean; // Axios 兼容：取消标识
 }
 
 export type RequestInterceptor = (
