@@ -1,5 +1,5 @@
 export { createFetchX, FetchX } from './FetchX';
-export { FetchXError } from './types';
+export { FetchXError, CancelToken } from './types';
 export { isCancel } from './utils';
 export type {
   FetchXConfig,
@@ -9,6 +9,7 @@ export type {
   RequestInterceptor,
   ResponseInterceptor,
   HttpMethod,
+  ResponseType,
 } from './types';
 
 export { default } from './FetchX';

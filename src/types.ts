@@ -9,6 +9,16 @@ import type {
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
 
 /**
+ * Response type for forced parsing (overrides Content-Type detection)
+ */
+export type ResponseType =
+  | 'json'
+  | 'text'
+  | 'blob'
+  | 'arrayBuffer'
+  | 'formData';
+
+/**
  * Global configuration for a FetchX instance
  */
 export interface FetchXConfig {
@@ -16,6 +26,9 @@ export interface FetchXConfig {
   headers?: Record<string, string>;
   timeout?: number;
   credentials?: RequestCredentials;
+  validateStatus?: (_status: number) => boolean;
+  responseType?: ResponseType;
+  dedupe?: boolean;
 }
 
 /**
@@ -27,6 +40,29 @@ export interface RequestOptions extends Partial<FetchXConfig> {
   body?: unknown;
   method?: string;
   signal?: AbortSignal;
+  cancelToken?: CancelToken;
+}
+
+/**
+ * Cancel token for request cancellation (axios-compatible API)
+ */
+export class CancelToken {
+  private controller = new AbortController();
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  static source(): {
+    token: CancelToken;
+    cancel: (_reason?: string) => void;
+  } {
+    const token = new CancelToken();
+    const cancel = (reason?: string) => {
+      token.controller.abort(reason);
+    };
+    return { token, cancel };
+  }
 }
 
 /**
@@ -87,6 +123,7 @@ export interface FetchXInstance {
     request: RequestInterceptorManager;
     response: ResponseInterceptorManager;
   };
+  request: <T = unknown>(_config: RequestOptions) => Promise<T>;
   get: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
   post: <T = unknown>(
     _url: string,

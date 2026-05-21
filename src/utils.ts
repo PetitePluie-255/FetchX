@@ -3,6 +3,7 @@ import {
   type FetchXConfig,
   type FetchXResponse,
   type RequestOptions,
+  type ResponseType,
 } from './types';
 
 /**
@@ -100,6 +101,10 @@ export function mergeConfig(
     baseURL: instanceConfig.baseURL,
     timeout: requestOptions.timeout ?? instanceConfig.timeout,
     credentials: requestOptions.credentials ?? instanceConfig.credentials,
+    validateStatus:
+      requestOptions.validateStatus ?? instanceConfig.validateStatus,
+    responseType: requestOptions.responseType ?? instanceConfig.responseType,
+    dedupe: requestOptions.dedupe ?? instanceConfig.dedupe,
     ...requestOptions,
     headers: {
       ...instanceConfig.headers,
@@ -118,7 +123,27 @@ export function isSuccessStatus(status: number): boolean {
 /**
  * Parse response body based on Content-Type
  */
-export async function parseResponse(response: Response): Promise<unknown> {
+export async function parseResponse(
+  response: Response,
+  responseType?: ResponseType
+): Promise<unknown> {
+  if (responseType) {
+    switch (responseType) {
+      case 'json':
+        return response.json();
+      case 'text':
+        return response.text();
+      case 'blob':
+        return response.blob();
+      case 'arrayBuffer':
+        return response.arrayBuffer();
+      case 'formData':
+        return response.formData();
+      default:
+        break;
+    }
+  }
+
   const contentType = response.headers.get('content-type');
 
   if (contentType?.includes('application/json')) {

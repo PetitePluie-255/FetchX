@@ -189,10 +189,7 @@ describe('Interceptors', () => {
         throw _error;
       });
 
-      api.interceptors.response.use(
-        response => response,
-        onRejected,
-      );
+      api.interceptors.response.use(response => response, onRejected);
 
       try {
         await api.get('/not-found');
@@ -223,7 +220,7 @@ describe('Interceptors', () => {
           new Response(JSON.stringify({ retried: true }), {
             status: 200,
             headers: { 'content-type': 'application/json' },
-          }),
+          })
       );
 
       const result = await api.get('/protected');
@@ -245,7 +242,7 @@ describe('Interceptors', () => {
         response => response,
         () => {
           throw customError;
-        },
+        }
       );
 
       await expect(api.get('/error')).rejects.toThrow('Boom');
@@ -269,14 +266,14 @@ describe('Interceptors', () => {
           order.push('fulfilled-1');
           return response;
         },
-        error => {
+        _error => {
           order.push('rejected-1');
           // Recover with a good response
           return new Response(JSON.stringify({ recovered: true }), {
             status: 200,
             headers: { 'content-type': 'application/json' },
           });
-        },
+        }
       );
 
       // Second: fulfilled handler sees the recovered response
@@ -401,13 +398,13 @@ describe('Interceptors', () => {
         () => ({
           url: '/fallback',
           method: 'GET',
-        }),
+        })
       );
 
       await api.get('/test');
       expect(mockFetch).toHaveBeenCalledWith(
         '/fallback',
-        expect.objectContaining({ method: 'GET' }),
+        expect.objectContaining({ method: 'GET' })
       );
     });
   });

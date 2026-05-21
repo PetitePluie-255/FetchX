@@ -18,6 +18,36 @@ import {
 } from './utils';
 
 /**
+ * Merge multiple AbortSignals into one.
+ * - 0 signals → undefined
+ * - 1 signal → returns it directly
+ * - 2+ signals → creates a controller that aborts when any source aborts
+ */
+function mergeSignals(
+  ...signals: Array<AbortSignal | undefined>
+): AbortSignal | undefined {
+  const valid = signals.filter(Boolean) as AbortSignal[];
+  if (valid.length === 0) return undefined;
+  if (valid.length === 1) return valid[0];
+
+  const controller = new AbortController();
+  for (const sig of valid) {
+    if (sig.aborted) {
+      controller.abort(sig.reason);
+      break;
+    }
+    sig.addEventListener(
+      'abort',
+      () => {
+        controller.abort(sig.reason);
+      },
+      { once: true }
+    );
+  }
+  return controller.signal;
+}
+
+/**
  * FetchX - A fetch-based HTTP client with axios-like API
  */
 export class FetchX {
@@ -27,6 +57,8 @@ export class FetchX {
     request: RequestInterceptorManager;
     response: ResponseInterceptorManager;
   };
+
+  private _pending = new Map<string, AbortController>();
 
   constructor(config: FetchXConfig = {}) {
     this.config = {
@@ -44,9 +76,17 @@ export class FetchX {
   }
 
   /**
-   * Core request method
+   * Generic request method (axios-style single config object)
    */
-  private async request<T = unknown>(
+  async request<T = unknown>(options: RequestOptions): Promise<T> {
+    const { method = 'GET', url = '', body, ...rest } = options;
+    return this._request<T>(method as HttpMethod, url, body, rest);
+  }
+
+  /**
+   * Core request method (internal)
+   */
+  private async _request<T = unknown>(
     method: HttpMethod,
     url: string,
     body?: unknown,
@@ -79,14 +119,29 @@ export class FetchX {
     // Build headers
     const headers = new Headers(processedConfig.headers ?? {});
 
-    // Handle signal and timeout
+    // Collect external signals
     const userSignal = processedConfig.signal;
-    let requestSignal: AbortSignal | undefined = userSignal;
-    let timedOut = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const cancelSignal = processedConfig.cancelToken?.signal;
+    let dedupeKey: string | undefined;
+    let dedupeSignal: AbortSignal | undefined;
 
-    // Check if user signal is already aborted
-    if (userSignal?.aborted) {
+    // Auto-dedup: cancel previous identical request before starting
+    if (processedConfig.dedupe) {
+      dedupeKey = `${method}:${fullURL}`;
+      const existing = this._pending.get(dedupeKey);
+      if (existing) {
+        existing.abort();
+      }
+      const dedupeController = new AbortController();
+      this._pending.set(dedupeKey, dedupeController);
+      dedupeSignal = dedupeController.signal;
+    }
+
+    // Merge all external signals into one
+    const mergedSignal = mergeSignals(userSignal, cancelSignal, dedupeSignal);
+
+    // Check if any signal is already aborted
+    if (mergedSignal?.aborted) {
       throw new FetchXError(
         'Request canceled',
         processedConfig,
@@ -94,16 +149,20 @@ export class FetchX {
       );
     }
 
+    let requestSignal: AbortSignal | undefined = mergedSignal;
+    let timedOut = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     // Set up timeout controller if timeout > 0
     if (processedConfig.timeout && processedConfig.timeout > 0) {
       const timeoutController = new AbortController();
 
-      // Link user signal to timeout controller
-      if (userSignal) {
-        userSignal.addEventListener(
+      // Link merged external signals to timeout controller
+      if (mergedSignal) {
+        mergedSignal.addEventListener(
           'abort',
           () => {
-            timeoutController.abort(userSignal.reason);
+            timeoutController.abort(mergedSignal.reason);
           },
           { once: true }
         );
@@ -127,8 +186,9 @@ export class FetchX {
         credentials: processedConfig.credentials,
       });
 
-      // Build response promise: resolve on 2xx, reject with FetchXError on non-2xx
-      const responsePromise = isSuccessStatus(response.status)
+      // Use validateStatus (or default 2xx) to determine success
+      const statusValidator = processedConfig.validateStatus ?? isSuccessStatus;
+      const responsePromise = statusValidator(response.status)
         ? Promise.resolve(response)
         : Promise.reject(
             new FetchXError(
@@ -142,8 +202,11 @@ export class FetchX {
       const processedResponse =
         await this.interceptors.response.run(responsePromise);
 
-      // Parse response data
-      const data = await parseResponse(processedResponse);
+      // Parse response data (respect responseType if set)
+      const data = await parseResponse(
+        processedResponse,
+        processedConfig.responseType
+      );
       return data as T;
     } catch (error: unknown) {
       if (error instanceof Error) {
@@ -183,6 +246,9 @@ export class FetchX {
       if (timeoutId !== undefined) {
         clearTimeout(timeoutId);
       }
+      if (dedupeKey) {
+        this._pending.delete(dedupeKey);
+      }
     }
   }
 
@@ -190,7 +256,7 @@ export class FetchX {
    * GET request
    */
   async get<T = unknown>(url: string, options?: RequestOptions): Promise<T> {
-    return this.request<T>('GET', url, undefined, options);
+    return this._request<T>('GET', url, undefined, options);
   }
 
   /**
@@ -201,7 +267,7 @@ export class FetchX {
     body?: unknown,
     options?: RequestOptions
   ): Promise<T> {
-    return this.request<T>('POST', url, body, options);
+    return this._request<T>('POST', url, body, options);
   }
 
   /**
@@ -212,14 +278,14 @@ export class FetchX {
     body?: unknown,
     options?: RequestOptions
   ): Promise<T> {
-    return this.request<T>('PUT', url, body, options);
+    return this._request<T>('PUT', url, body, options);
   }
 
   /**
    * DELETE request
    */
   async delete<T = unknown>(url: string, options?: RequestOptions): Promise<T> {
-    return this.request<T>('DELETE', url, undefined, options);
+    return this._request<T>('DELETE', url, undefined, options);
   }
 
   /**
@@ -230,14 +296,14 @@ export class FetchX {
     body?: unknown,
     options?: RequestOptions
   ): Promise<T> {
-    return this.request<T>('PATCH', url, body, options);
+    return this._request<T>('PATCH', url, body, options);
   }
 
   /**
    * HEAD request
    */
   async head<T = unknown>(url: string, options?: RequestOptions): Promise<T> {
-    return this.request<T>('HEAD', url, undefined, options);
+    return this._request<T>('HEAD', url, undefined, options);
   }
 }
 

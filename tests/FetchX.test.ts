@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFetchX } from '../src/FetchX';
-import { FetchXError } from '../src/types';
+import { FetchXError, CancelToken } from '../src/types';
 
 const mockFetch = vi.fn();
 
@@ -54,7 +54,7 @@ describe('FetchX', () => {
         expect.objectContaining({
           method: 'GET',
           headers: expect.any(Headers),
-        }),
+        })
       );
       expect(result).toEqual(mockData);
     });
@@ -73,7 +73,7 @@ describe('FetchX', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/users?page=1&limit=10',
-        expect.any(Object),
+        expect.any(Object)
       );
     });
   });
@@ -98,7 +98,7 @@ describe('FetchX', () => {
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify(postBody),
-        }),
+        })
       );
       expect(result).toEqual(mockResponse);
     });
@@ -123,7 +123,7 @@ describe('FetchX', () => {
         expect.objectContaining({
           method: 'POST',
           body: formData,
-        }),
+        })
       );
     });
   });
@@ -147,7 +147,7 @@ describe('FetchX', () => {
         expect.objectContaining({
           method: 'PUT',
           body: JSON.stringify(putBody),
-        }),
+        })
       );
       expect(result).toEqual(putBody);
     });
@@ -169,7 +169,7 @@ describe('FetchX', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/users/1',
-        expect.objectContaining({ method: 'DELETE' }),
+        expect.objectContaining({ method: 'DELETE' })
       );
     });
   });
@@ -193,7 +193,7 @@ describe('FetchX', () => {
         expect.objectContaining({
           method: 'PATCH',
           body: JSON.stringify(patchBody),
-        }),
+        })
       );
       expect(result).toEqual(patchBody);
     });
@@ -214,7 +214,7 @@ describe('FetchX', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         '/users',
-        expect.objectContaining({ method: 'HEAD' }),
+        expect.objectContaining({ method: 'HEAD' })
       );
     });
   });
@@ -234,7 +234,7 @@ describe('FetchX', () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/users',
-        expect.any(Object),
+        expect.any(Object)
       );
     });
   });
@@ -253,7 +253,7 @@ describe('FetchX', () => {
                 reject(err);
               });
             }
-          }),
+          })
       );
 
       await expect(api.get('/slow')).rejects.toThrow('Request timeout');
@@ -283,7 +283,7 @@ describe('FetchX', () => {
       const api = createFetchX();
 
       await expect(
-        api.get('/test', { signal: controller.signal }),
+        api.get('/test', { signal: controller.signal })
       ).rejects.toThrow('Request canceled');
       expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -302,7 +302,7 @@ describe('FetchX', () => {
                 reject(err);
               });
             }
-          }),
+          })
       );
 
       const promise = api.get('/test', { signal: controller.signal });
@@ -339,7 +339,7 @@ describe('FetchX', () => {
       mockFetch.mockRejectedValueOnce(
         Object.assign(new TypeError('Failed to fetch'), {
           message: 'Failed to fetch',
-        }),
+        })
       );
 
       const api = createFetchX();
@@ -391,6 +391,274 @@ describe('FetchX', () => {
       const api = createFetchX();
       const result = await api.get('/blob');
       expect(result).toBe(blob);
+    });
+  });
+
+  describe('validateStatus', () => {
+    it('should treat 4xx as success with custom validateStatus', async () => {
+      const notFoundData = { error: 'not found' };
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve(notFoundData),
+      });
+
+      const api = createFetchX({
+        validateStatus: (status: number) => status < 500,
+      });
+      const result = await api.get('/not-found');
+      expect(result).toEqual(notFoundData);
+    });
+
+    it('should still reject with default validator', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: new Headers({}),
+      });
+
+      const api = createFetchX();
+      await expect(api.get('/not-found')).rejects.toThrow(
+        'Request failed with status 404'
+      );
+    });
+
+    it('should support per-request validateStatus override', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 304,
+        statusText: 'Not Modified',
+        headers: new Headers({}),
+        blob: () => Promise.resolve(new Blob()),
+      });
+
+      const api = createFetchX();
+      const result = await api.get('/not-modified', {
+        validateStatus: (status: number) => status === 304,
+      });
+      expect(result).toBeInstanceOf(Blob);
+    });
+  });
+
+  describe('responseType', () => {
+    it('should force text parsing despite JSON content-type', async () => {
+      const textData = '{"key":"value"}';
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ key: 'value' }),
+        text: () => Promise.resolve(textData),
+      });
+
+      const api = createFetchX({ responseType: 'text' });
+      const result = await api.get('/data');
+      expect(result).toBe(textData);
+    });
+
+    it('should force blob parsing', async () => {
+      const blob = new Blob(['test']);
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({}),
+        blob: () => Promise.resolve(blob),
+      });
+
+      const api = createFetchX({ responseType: 'blob' });
+      const result = await api.get('/file');
+      expect(result).toBe(blob);
+    });
+
+    it('should support per-request responseType override', async () => {
+      const textData = 'plain text response';
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({}),
+        text: () => Promise.resolve(textData),
+      });
+
+      const api = createFetchX();
+      const result = await api.get('/text', { responseType: 'text' });
+      expect(result).toBe(textData);
+    });
+  });
+
+  describe('api.request(config)', () => {
+    it('should make a GET request via request()', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ id: 1 }),
+      });
+
+      const api = createFetchX();
+      const result = await api.request({
+        method: 'GET',
+        url: '/users',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/users',
+        expect.objectContaining({ method: 'GET' })
+      );
+      expect(result).toEqual({ id: 1 });
+    });
+
+    it('should make a POST request via request()', async () => {
+      const postBody = { name: 'Test' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        statusText: 'Created',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ id: 1 }),
+      });
+
+      const api = createFetchX();
+      const result = await api.request({
+        method: 'POST',
+        url: '/users',
+        body: postBody,
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/users',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(postBody),
+        })
+      );
+      expect(result).toEqual({ id: 1 });
+    });
+
+    it('should default to GET when no method is specified', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({}),
+      });
+
+      const api = createFetchX();
+      await api.request({ url: '/default' });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/default',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+  });
+
+  describe('CancelToken', () => {
+    it('should cancel request using CancelToken.source()', async () => {
+      mockFetch.mockImplementationOnce(
+        (_url: string, _options?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            if (_options?.signal) {
+              _options.signal.addEventListener('abort', () => {
+                const err = new Error('The operation was aborted');
+                err.name = 'AbortError';
+                reject(err);
+              });
+            }
+          })
+      );
+
+      const api = createFetchX();
+      const { token, cancel } = CancelToken.source();
+
+      setTimeout(() => cancel(), 10);
+      await expect(api.get('/test', { cancelToken: token })).rejects.toThrow(
+        'Request canceled'
+      );
+    });
+
+    it('should immediately reject when token is already canceled', async () => {
+      const { token, cancel } = CancelToken.source();
+      cancel();
+
+      const api = createFetchX();
+      await expect(api.get('/test', { cancelToken: token })).rejects.toThrow(
+        'Request canceled'
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dedupe', () => {
+    it('should cancel previous identical request when dedupe is enabled', async () => {
+      let firstAborted = false;
+      mockFetch.mockImplementationOnce(
+        (_url: string, _options?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            if (_options?.signal) {
+              _options.signal.addEventListener('abort', () => {
+                firstAborted = true;
+                const err = new Error('The operation was aborted');
+                err.name = 'AbortError';
+                reject(err);
+              });
+            }
+          })
+      );
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ data: 'second' }),
+      });
+
+      const api = createFetchX({ dedupe: true });
+
+      const first = api.get('/dedupe-test');
+      // Small delay to let first request start before second comes in
+      await new Promise(resolve => setTimeout(resolve, 5));
+      const second = api.get('/dedupe-test');
+
+      const secondResult = await second;
+      expect(secondResult).toEqual({ data: 'second' });
+
+      await expect(first).rejects.toThrow('Request canceled');
+      expect(firstAborted).toBe(true);
+    });
+
+    it('should not cancel requests to different URLs', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ data: 'a' }),
+      });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ data: 'b' }),
+      });
+
+      const api = createFetchX({ dedupe: true });
+
+      const [a, b] = await Promise.all([api.get('/url-a'), api.get('/url-b')]);
+
+      expect(a).toEqual({ data: 'a' });
+      expect(b).toEqual({ data: 'b' });
     });
   });
 });
