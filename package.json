@@ -1,6 +1,6 @@
 {
   "name": "@petite-pluie/fetchx",
-  "version": "0.1.12",
+  "version": "0.1.0",
   "description": "A modern HTTP client library based on fetch API with axios-like interface",
   "repository": {
     "type": "git",
@@ -40,7 +40,6 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
     "type-check": "tsc --noEmit",
     "commit": "cz",
-    "check-file-types": "node scripts/check-file-types.js",
     "prepare": "husky install",
     "lint-staged": "lint-staged",
     "release": "release-it",
@@ -65,7 +64,6 @@
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
-    "@commitlint/config-lerna-scopes": "^20.0.0",
     "@eslint/js": "^9.38.0",
     "@release-it/conventional-changelog": "^10.0.1",
     "@types/node": "^20.10.0",
@@ -80,7 +78,6 @@
     "eslint-plugin-prettier": "^5.0.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.2.5",
-    "minimatch": "^10.0.3",
     "prettier": "^3.1.0",
     "release-it": "^19.0.5",
     "terser": "^5.44.0",

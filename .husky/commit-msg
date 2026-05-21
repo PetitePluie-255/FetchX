@@ -1,9 +1,2 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 # 运行 commitlint 验证提交信息格式
 npx --no -- commitlint --edit $1
-
-# 运行文件类型检查
-echo "🔍 检查提交文件类型..."
-node scripts/check-file-types.js $1

@@ -1,26 +1,38 @@
-/**
- * FetchX 类型定义
- * 所有类型定义集中管理，确保类型安全
- */
+import type {
+  RequestInterceptorManager,
+  ResponseInterceptorManager,
+} from './interceptors';
 
+/**
+ * HTTP method union type
+ */
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
+
+/**
+ * Global configuration for a FetchX instance
+ */
 export interface FetchXConfig {
   baseURL?: string;
   headers?: Record<string, string>;
   timeout?: number;
   credentials?: RequestCredentials;
-  [key: string]: unknown;
 }
 
-export interface RequestOptions extends Omit<FetchXConfig, 'baseURL'> {
+/**
+ * Per-request options (includes all config fields as overrides)
+ */
+export interface RequestOptions extends Partial<FetchXConfig> {
   url?: string;
   params?: Record<string, unknown>;
   body?: unknown;
   method?: string;
   signal?: AbortSignal;
-  timeout?: number;
 }
 
-export interface FetchXResponse<T = Record<string, unknown>> {
+/**
+ * Standardized response object
+ */
+export interface FetchXResponse<T = unknown> {
   data: T;
   status: number;
   statusText: string;
@@ -28,67 +40,69 @@ export interface FetchXResponse<T = Record<string, unknown>> {
   config: RequestOptions;
 }
 
-export interface FetchXError extends Error {
-  config?: RequestOptions;
-  code?: string;
-  request?: unknown;
-  response?: FetchXResponse;
-  isAxiosError?: boolean;
-  __CANCEL__?: boolean; // Axios 兼容：取消标识
+/**
+ * FetchX error class
+ */
+export class FetchXError extends Error {
+  readonly config?: RequestOptions;
+  readonly code?: string;
+  readonly request?: unknown;
+  readonly response?: FetchXResponse;
+  readonly isAxiosError = true;
+  readonly __CANCEL__?: boolean;
+
+  constructor(
+    message: string,
+    config?: RequestOptions,
+    code?: string,
+    request?: unknown
+  ) {
+    super(message);
+    this.name = 'FetchXError';
+    this.config = config;
+    this.code = code;
+    this.request = request;
+  }
 }
 
+/**
+ * Request interceptor function type
+ */
 export type RequestInterceptor = (
   _options: RequestOptions
 ) => Promise<RequestOptions> | RequestOptions;
 
+/**
+ * Response interceptor function type
+ */
 export type ResponseInterceptor = (
   _response: Response
 ) => Promise<Response> | Response;
 
-export interface FetchXInterceptor<T = unknown> {
-  onFulfilled?: (_value: T) => T | Promise<T>;
-  onRejected?: (_error: unknown) => unknown;
-}
-
+/**
+ * FetchX instance public API
+ */
 export interface FetchXInstance {
-  get: <T extends Record<string, unknown> = Record<string, unknown>>(
-    _url: string,
-    _options?: RequestOptions
-  ) => Promise<T>;
-  post: <T extends Record<string, unknown> = Record<string, unknown>>(
-    _url: string,
-    _body?: unknown,
-    _options?: RequestOptions
-  ) => Promise<T>;
-  put: <T extends Record<string, unknown> = Record<string, unknown>>(
-    _url: string,
-    _body?: unknown,
-    _options?: RequestOptions
-  ) => Promise<T>;
-  delete: <T extends Record<string, unknown> = Record<string, unknown>>(
-    _url: string,
-    _options?: RequestOptions
-  ) => Promise<T>;
-  patch: <T extends Record<string, unknown> = Record<string, unknown>>(
-    _url: string,
-    _body?: unknown,
-    _options?: RequestOptions
-  ) => Promise<T>;
-  head: <T extends Record<string, unknown> = Record<string, unknown>>(
-    _url: string,
-    _options?: RequestOptions
-  ) => Promise<T>;
-
   interceptors: {
-    request: {
-      use: (_fn: RequestInterceptor) => void;
-      eject: (_id: number) => void;
-    };
-    response: {
-      use: (_fn: ResponseInterceptor) => void;
-      eject: (_id: number) => void;
-    };
+    request: RequestInterceptorManager;
+    response: ResponseInterceptorManager;
   };
+  get: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
+  post: <T = unknown>(
+    _url: string,
+    _body?: unknown,
+    _options?: RequestOptions
+  ) => Promise<T>;
+  put: <T = unknown>(
+    _url: string,
+    _body?: unknown,
+    _options?: RequestOptions
+  ) => Promise<T>;
+  delete: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
+  patch: <T = unknown>(
+    _url: string,
+    _body?: unknown,
+    _options?: RequestOptions
+  ) => Promise<T>;
+  head: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
 }
-
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';

@@ -1,117 +1,90 @@
+import type { RequestOptions } from './types';
+
+interface InterceptorEntry<T> {
+  id: number;
+  fulfilled?: (_value: T) => T | Promise<T>;
+  rejected?: (_error: unknown) => T | Promise<T>;
+}
+
 /**
- * FetchX 拦截器系统
- * 链式 add/remove、异步执行
+ * Generic interceptor manager
  */
-
-import type {
-  RequestInterceptor,
-  RequestOptions,
-  ResponseInterceptor,
-} from './types';
-
-export class InterceptorManager<V, F = (_value: V) => V | Promise<V>> {
-  private interceptors: Array<{
-    id: number;
-    fulfilled?: F;
-    rejected?: (_error: unknown) => V | Promise<V>;
-  }> = [];
+export class InterceptorManager<T> {
+  private entries: Array<InterceptorEntry<T>> = [];
   private nextId = 0;
 
   /**
-   * 添加拦截器
+   * Add an interceptor. Returns an ID that can be used to eject it.
    */
-  use(fulfilled?: F, rejected?: (_error: unknown) => V | Promise<V>): number {
+  use(
+    fulfilled?: (_value: T) => T | Promise<T>,
+    rejected?: (_error: unknown) => T | Promise<T>
+  ): number {
     const id = this.nextId++;
-    this.interceptors.push({ id, fulfilled, rejected });
+    this.entries.push({ id, fulfilled, rejected });
     return id;
   }
 
   /**
-   * 移除拦截器
+   * Remove an interceptor by its ID
    */
   eject(id: number): void {
-    const index = this.interceptors.findIndex(
-      interceptor => interceptor.id === id
-    );
+    const index = this.entries.findIndex(_entry => _entry.id === id);
     if (index !== -1) {
-      this.interceptors.splice(index, 1);
+      this.entries.splice(index, 1);
     }
   }
 
   /**
-   * 清空所有拦截器
+   * Remove all interceptors
    */
   clear(): void {
-    this.interceptors = [];
+    this.entries = [];
   }
 
   /**
-   * 获取所有拦截器
+   * Iterate over all interceptors
    */
-  forEach(
-    fn: (_interceptor: {
-      id: number;
-      fulfilled?: F;
-      rejected?: (_error: unknown) => V | Promise<V>;
-    }) => void
-  ): void {
-    this.interceptors.forEach(fn);
+  forEach(fn: (_entry: InterceptorEntry<T>) => void): void {
+    this.entries.forEach(fn);
   }
 
   /**
-   * 获取拦截器数量
+   * Number of active interceptors
    */
   get length(): number {
-    return this.interceptors.length;
+    return this.entries.length;
   }
 }
 
-export class RequestInterceptorManager extends InterceptorManager<
-  RequestOptions,
-  RequestInterceptor
-> {
+/**
+ * Request interceptor manager
+ */
+export class RequestInterceptorManager extends InterceptorManager<RequestOptions> {
   /**
-   * 执行请求拦截器链
+   * Execute the request interceptor chain
    */
-  async run(config: RequestOptions): Promise<RequestOptions> {
+  run(config: RequestOptions): Promise<RequestOptions> {
     let promise: Promise<RequestOptions> = Promise.resolve(config);
 
     this.forEach(({ fulfilled, rejected }) => {
-      promise = promise.then(
-        fulfilled
-          ? (value: RequestOptions): RequestOptions | Promise<RequestOptions> =>
-              fulfilled(value)
-          : (value: RequestOptions) => value,
-        rejected
-          ? (error: unknown): RequestOptions | Promise<RequestOptions> =>
-              rejected(error)
-          : undefined
-      );
+      promise = promise.then(fulfilled, rejected);
     });
 
     return promise;
   }
 }
 
-export class ResponseInterceptorManager extends InterceptorManager<
-  Response,
-  ResponseInterceptor
-> {
+/**
+ * Response interceptor manager
+ */
+export class ResponseInterceptorManager extends InterceptorManager<Response> {
   /**
-   * 执行响应拦截器链
+   * Execute the response interceptor chain
    */
-  async run(response: Response): Promise<Response> {
-    let promise: Promise<Response> = Promise.resolve(response);
-
+  run(promise: Promise<Response>): Promise<Response> {
     this.forEach(({ fulfilled, rejected }) => {
-      promise = promise.then(
-        fulfilled
-          ? (value: Response): Response | Promise<Response> => fulfilled(value)
-          : (value: Response) => value,
-        rejected
-          ? (error: unknown): Response | Promise<Response> => rejected(error)
-          : undefined
-      );
+      promise = promise.then(fulfilled, rejected);
     });
 
     return promise;
