@@ -40,6 +40,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,md}\"",
     "type-check": "tsc --noEmit",
     "commit": "cz",
+    "check-file-types": "node scripts/check-file-types.js",
     "prepare": "husky install",
     "lint-staged": "lint-staged",
     "release": "release-it",
@@ -94,14 +95,5 @@
     "commitizen": {
       "path": "node_modules/cz-git"
     }
-  },
-  "lint-staged": {
-    "src/**/*.{ts,tsx,js,jsx}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md,yml,yaml}": [
-      "prettier --write"
-    ]
   }
 }
