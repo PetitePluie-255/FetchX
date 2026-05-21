@@ -20,19 +20,18 @@ export default defineConfig({
       formats: ['es', 'cjs'],
       fileName: format => `index.${format === 'es' ? 'js' : 'cjs'}`,
     },
-    rollupOptions: {
+    sourcemap: false,
+    minify: 'oxc',
+    rolldownOptions: {
       external: [],
       output: {
-        globals: {},
         exports: 'named',
-      },
-    },
-    sourcemap: false,
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
+        minify: {
+          compress: {
+            dropConsole: true,
+            dropDebugger: true,
+          },
+        },
       },
     },
   },
