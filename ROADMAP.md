@@ -121,6 +121,9 @@ P1 — 重试和缓存是高频需求。
 
 ### 计划功能
 
+- **`responseType: 'stream'`** — 原始 ReadableStream 访问，与现有 API 一致
+  - `api.get('/file', { responseType: 'stream' })` → `ReadableStream<Uint8Array>`
+  - 不消费 body，用户完全自主处理
 - **`api.stream(url, options?)`** — 原始 Uint8Array 流，最基础的流式传输
 - **`api.sse(url, options?)`** — SSE（Server-Sent Events）协议解析
   - 按 SSE 协议提取 `data`/`event`/`id`/`retry` 字段
@@ -128,12 +131,27 @@ P1 — 重试和缓存是高频需求。
   - `:` 注释行忽略
   - `[DONE]` 终止信号识别
   - data 字段保持原始 string，不做 JSON 解析
+  - **HTTP 方法默认 POST**，支持 body 传参（AI Chat 场景）
+  - 自动设置 `Accept: text/event-stream`
+  - 响应暴露 `id`/`retry` 字段供上层实现重连策略
 - **`api.ndjson<T>(url, options?)`** — NDJSON 逐行 JSON 解析
 - **`FetchXStream<T>`** — 统一流式容器
   - `AsyncIterable<T>` — 支持 `for await...of`
-  - `.abort()` — 手动取消
-  - `.response` — 访问原始 Response（status/headers）
+  - `.abort()` — 手动取消（自动释放 reader）
+  - `.response` — 访问原始 Response（status/headers），abort 后仍可读
 - **复用现有基础设施**：mergeConfig、buildURL、serializeBody、请求拦截器、超时/取消
+
+### 设计决策
+
+| 问题                 | 决策                                                                  |
+| -------------------- | --------------------------------------------------------------------- |
+| POST body 支持       | `api.sse('/chat', { body: { messages } })`，body 走现有 serializeBody |
+| 流式请求的 HTTP 错误 | **不抛异常**，返回流让用户检查 `stream.response.status`               |
+| 自动重连             | **不内置**，暴露 `id`/`retry` 字段，用户自行实现                      |
+| 响应拦截器           | **跳过**，流式方法不走响应拦截器（避免意外消费 body）                 |
+| 请求拦截器           | **正常走**，token 注入等基础能力必须支持                              |
+| 内存/背压            | AsyncIterable 天然背压，不做 buffer 上限（信任消费者及时消费）        |
+| `.tee()` 多路消费    | **暂不支持**，需求频率低，可后续插件扩展                              |
 
 ### API 预览
 
@@ -141,6 +159,7 @@ P1 — 重试和缓存是高频需求。
 // SSE 流式调用（AI Chat 核心场景）
 const stream = api.sse('/chat/completions', { body: { messages } });
 for await (const event of stream) {
+  if (!stream.response.ok) throw new Error(`HTTP ${stream.response.status}`);
   const chunk = JSON.parse(event.data); // 按需解析 JSON
 }
 
@@ -156,6 +175,10 @@ for await (const chunk of stream) {
   // chunk: Uint8Array
 }
 
+// responseType: 'stream' — 通过现有 API 获取原始流
+const rs = await api.get('/file', { responseType: 'stream' });
+// rs: ReadableStream<Uint8Array>
+
 // 访问响应信息 & 手动取消
 console.log(stream.response.status);
 stream.abort();
@@ -164,6 +187,25 @@ stream.abort();
 ### 优先级
 
 P0 — 流式支持是 FetchX 的立库之本，AI Chat 场景的刚需。
+
+---
+
+## v1.5 — 核心缺陷修复 🔜 计划中
+
+### 目标
+
+修复 v1.0~v1.3 中已确认的运行时缺陷，补齐 API 完整性。
+
+### 计划修复
+
+- **`Content-Type` 与 FormData 冲突** — FormData body 时自动移除默认 `application/json`，让浏览器正确设置 multipart boundary
+- **`URLSearchParams` 支持** — `serializeBody` 增加 `URLSearchParams` 分支，正确序列化为 `application/x-www-form-urlencoded`
+- **空 body JSON 解析** — `parseResponse` 对 HEAD/204 等无 body 响应的 `response.json()` 做降级处理
+- **响应返回 `FetchXResponse<T>`** — 对齐 axios 风格，返回 `{ data, status, headers, statusText, config }`
+
+### 优先级
+
+P0 — Bug 修复是发布的前置条件。详见 [BUGS.md](./BUGS.md)。
 
 ---
 
@@ -288,6 +330,7 @@ P2 — 插件形式提供，作为流式上传方案的兼容性兜底。
 | v1.2 | 请求/响应控制增强  | ✅ 已完成   |
 | v1.3 | 高级请求特性       | ✅ 已完成   |
 | v1.4 | 通用流式封装       | 🔜 方案已定 |
+| v1.5 | 核心缺陷修复       | 🔜 计划中   |
 | v2.0 | React / Vue 集成   | 🔮 计划中   |
 | v2.1 | 高级数据管理       | 🔮 计划中   |
 | v3.0 | 企业级特性         | 🔮 计划中   |
