@@ -105,6 +105,10 @@ export function mergeConfig(
       requestOptions.validateStatus ?? instanceConfig.validateStatus,
     responseType: requestOptions.responseType ?? instanceConfig.responseType,
     dedupe: requestOptions.dedupe ?? instanceConfig.dedupe,
+    retry: requestOptions.retry ?? instanceConfig.retry,
+    cache: requestOptions.cache ?? instanceConfig.cache,
+    maxConcurrency:
+      requestOptions.maxConcurrency ?? instanceConfig.maxConcurrency,
     ...requestOptions,
     headers: {
       ...instanceConfig.headers,

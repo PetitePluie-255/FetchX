@@ -3,6 +3,7 @@ import {
   type FetchXConfig,
   type FetchXInstance,
   type HttpMethod,
+  type ProgressEvent,
   type RequestOptions,
 } from './types';
 import {
@@ -16,6 +17,15 @@ import {
   parseResponse,
   serializeBody,
 } from './utils';
+import { CacheStore, createCacheKey } from './cache';
+import { ConcurrencyManager } from './concurrency';
+import { executeWithRetry } from './retry';
+import {
+  trackDownloadProgress,
+  trackUploadProgress,
+  isStreamingNotSupportedError,
+  markStreamingSupported,
+} from './progress';
 
 /**
  * Merge multiple AbortSignals into one.
@@ -58,6 +68,9 @@ export class FetchX {
     response: ResponseInterceptorManager;
   };
 
+  private cacheStore: CacheStore;
+  private concurrency: ConcurrencyManager;
+
   private _pending = new Map<string, AbortController>();
 
   constructor(config: FetchXConfig = {}) {
@@ -73,6 +86,16 @@ export class FetchX {
       request: new RequestInterceptorManager(),
       response: new ResponseInterceptorManager(),
     };
+
+    this.cacheStore = new CacheStore(config.cache);
+    this.concurrency = new ConcurrencyManager(config.maxConcurrency);
+  }
+
+  /**
+   * Public cache manager
+   */
+  get cache(): CacheStore {
+    return this.cacheStore;
   }
 
   /**
@@ -103,152 +126,254 @@ export class FetchX {
       ...merged,
     };
 
-    // Execute request interceptors
+    // Run request interceptors
     const processedConfig = await this.interceptors.request.run(requestConfig);
 
-    // Build full URL with baseURL and params
+    // Build full URL
     const fullURL = buildURL(
       processedConfig.baseURL ?? '',
       processedConfig.url ?? url,
       processedConfig.params
     );
 
-    // Serialize request body
+    // Serialize body
     const serializedBody = serializeBody(processedConfig.body);
 
-    // Build headers
-    const headers = new Headers(processedConfig.headers ?? {});
-
-    // Collect external signals
-    const userSignal = processedConfig.signal;
-    const cancelSignal = processedConfig.cancelToken?.signal;
-    let dedupeKey: string | undefined;
-    let dedupeSignal: AbortSignal | undefined;
-
-    // Auto-dedup: cancel previous identical request before starting
-    if (processedConfig.dedupe) {
-      dedupeKey = `${method}:${fullURL}`;
-      const existing = this._pending.get(dedupeKey);
-      if (existing) {
-        existing.abort();
-      }
-      const dedupeController = new AbortController();
-      this._pending.set(dedupeKey, dedupeController);
-      dedupeSignal = dedupeController.signal;
-    }
-
-    // Merge all external signals into one
-    const mergedSignal = mergeSignals(userSignal, cancelSignal, dedupeSignal);
-
-    // Check if any signal is already aborted
-    if (mergedSignal?.aborted) {
-      throw new FetchXError(
-        'Request canceled',
-        processedConfig,
-        'ERR_CANCELED'
+    // --- Cache check ---
+    const cacheConfig = processedConfig.cache;
+    let cacheKey: string | undefined;
+    if (
+      this.cacheStore.isCacheable(cacheConfig, processedConfig.method ?? method)
+    ) {
+      cacheKey = createCacheKey(
+        processedConfig.method ?? method,
+        fullURL,
+        processedConfig.params,
+        processedConfig.body
       );
-    }
-
-    let requestSignal: AbortSignal | undefined = mergedSignal;
-    let timedOut = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    // Set up timeout controller if timeout > 0
-    if (processedConfig.timeout && processedConfig.timeout > 0) {
-      const timeoutController = new AbortController();
-
-      // Link merged external signals to timeout controller
-      if (mergedSignal) {
-        mergedSignal.addEventListener(
-          'abort',
-          () => {
-            timeoutController.abort(mergedSignal.reason);
-          },
-          { once: true }
-        );
+      const cached = this.cacheStore.get<T>(cacheKey);
+      if (cached !== undefined) {
+        return cached;
       }
-
-      timeoutId = setTimeout(() => {
-        timedOut = true;
-        timeoutController.abort();
-      }, processedConfig.timeout);
-
-      requestSignal = timeoutController.signal;
     }
+
+    // --- Concurrency gate ---
+    await this.concurrency.acquire();
 
     try {
-      // Execute fetch
-      const response = await fetch(fullURL, {
-        method,
-        headers,
-        body: serializedBody,
-        signal: requestSignal,
-        credentials: processedConfig.credentials,
-      });
+      // --- Dedupe setup (once per request, not per retry) ---
+      let dedupeKey: string | undefined;
+      let dedupeSignal: AbortSignal | undefined;
 
-      // Use validateStatus (or default 2xx) to determine success
-      const statusValidator = processedConfig.validateStatus ?? isSuccessStatus;
-      const responsePromise = statusValidator(response.status)
-        ? Promise.resolve(response)
-        : Promise.reject(
-            new FetchXError(
-              `Request failed with status ${response.status}`,
-              processedConfig,
-              'ERR_BAD_RESPONSE'
-            )
-          );
-
-      // Execute response interceptors (fulfilled gets Response, rejected can recover)
-      const processedResponse =
-        await this.interceptors.response.run(responsePromise);
-
-      // Parse response data (respect responseType if set)
-      const data = await parseResponse(
-        processedResponse,
-        processedConfig.responseType
-      );
-      return data as T;
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        // Timeout
-        if (timedOut || error.name === 'TimeoutError') {
-          throw new FetchXError(
-            'Request timeout',
-            processedConfig,
-            'ECONNABORTED'
-          );
+      if (processedConfig.dedupe) {
+        dedupeKey = `${processedConfig.method ?? method}:${fullURL}`;
+        const existing = this._pending.get(dedupeKey);
+        if (existing) {
+          existing.abort();
         }
-
-        // User-initiated cancel
-        if (error.name === 'AbortError') {
-          throw new FetchXError(
-            'Request canceled',
-            processedConfig,
-            'ERR_CANCELED'
-          );
-        }
-
-        // Network errors
-        if (
-          error.name === 'TypeError' &&
-          error.message.includes('fetch') === true
-        ) {
-          throw new FetchXError(
-            'Network Error',
-            processedConfig,
-            'ERR_NETWORK'
-          );
-        }
+        const dedupeController = new AbortController();
+        this._pending.set(dedupeKey, dedupeController);
+        dedupeSignal = dedupeController.signal;
       }
 
-      throw error;
+      // External signals (shared across retries)
+      const userSignal = processedConfig.signal;
+      const cancelSignal = processedConfig.cancelToken?.signal;
+      const timeout = processedConfig.timeout;
+      const validateStatus = processedConfig.validateStatus ?? isSuccessStatus;
+      const onDownloadProgress: ((_e: ProgressEvent) => void) | undefined =
+        processedConfig.onDownloadProgress;
+      const onUploadProgress: ((_e: ProgressEvent) => void) | undefined =
+        processedConfig.onUploadProgress;
+
+      try {
+        // --- Retry loop: wraps each fetch attempt ---
+        const retryPromise = executeWithRetry<Response>(
+          async () => {
+            // Merge external signals
+            const mergedSignal = mergeSignals(
+              userSignal,
+              cancelSignal,
+              dedupeSignal
+            );
+
+            // Check if any external signal is already aborted
+            if (mergedSignal?.aborted) {
+              throw new FetchXError(
+                'Request canceled',
+                processedConfig,
+                'ERR_CANCELED'
+              );
+            }
+
+            let requestSignal: AbortSignal | undefined = mergedSignal;
+            let timedOut = false;
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+            // Timeout setup (fresh timeout for each retry)
+            if (timeout && timeout > 0) {
+              const timeoutController = new AbortController();
+
+              if (mergedSignal) {
+                mergedSignal.addEventListener(
+                  'abort',
+                  () => {
+                    timeoutController.abort(mergedSignal.reason);
+                  },
+                  { once: true }
+                );
+              }
+
+              timeoutId = setTimeout(() => {
+                timedOut = true;
+                timeoutController.abort();
+              }, timeout);
+
+              requestSignal = timeoutController.signal;
+            }
+
+            let duplex: 'half' | undefined;
+
+            try {
+              // Build headers
+              const headers = new Headers(processedConfig.headers ?? {});
+
+              // Wrap body for upload progress (if requested)
+              const { body: uploadBody, duplex: d } = trackUploadProgress(
+                serializedBody,
+                onUploadProgress
+              );
+              duplex = d;
+
+              // Execute fetch
+              const rawResponse = await fetch(fullURL, {
+                method: processedConfig.method ?? method,
+                headers,
+                body: uploadBody as BodyInit | undefined,
+                signal: requestSignal,
+                credentials: processedConfig.credentials,
+                ...(duplex ? { duplex } : {}),
+              } satisfies RequestInit);
+
+              // First successful streaming upload — cache that this runtime supports it
+              if (duplex) {
+                markStreamingSupported(true);
+              }
+
+              // Track download progress
+              const trackedResponse = trackDownloadProgress(
+                rawResponse,
+                onDownloadProgress
+              );
+
+              // Validate status
+              if (!validateStatus(trackedResponse.status)) {
+                throw new FetchXError(
+                  `Request failed with status ${trackedResponse.status}`,
+                  processedConfig,
+                  'ERR_BAD_RESPONSE',
+                  undefined,
+                  trackedResponse.status
+                );
+              }
+
+              return trackedResponse;
+            } catch (fetchError: unknown) {
+              // If already a FetchXError (from validateStatus), re-throw
+              if (fetchError instanceof FetchXError) throw fetchError;
+
+              if (fetchError instanceof Error) {
+                // Timeout
+                if (timedOut || fetchError.name === 'TimeoutError') {
+                  throw new FetchXError(
+                    'Request timeout',
+                    processedConfig,
+                    'ECONNABORTED'
+                  );
+                }
+
+                // User-initiated cancel
+                if (fetchError.name === 'AbortError') {
+                  throw new FetchXError(
+                    'Request canceled',
+                    processedConfig,
+                    'ERR_CANCELED'
+                  );
+                }
+
+                // Streaming upload not supported (duplex: 'half' + ReadableStream)
+                if (duplex) {
+                  const msg = isStreamingNotSupportedError(fetchError);
+                  if (msg) {
+                    markStreamingSupported(false);
+                    throw new FetchXError(
+                      msg,
+                      processedConfig,
+                      'ERR_NOT_SUPPORTED'
+                    );
+                  }
+                }
+
+                // Network errors
+                if (
+                  fetchError.name === 'TypeError' &&
+                  fetchError.message.includes('fetch') === true
+                ) {
+                  throw new FetchXError(
+                    'Network Error',
+                    processedConfig,
+                    'ERR_NETWORK'
+                  );
+                }
+              }
+
+              throw fetchError;
+            } finally {
+              if (timeoutId !== undefined) {
+                clearTimeout(timeoutId);
+              }
+            }
+          },
+          processedConfig.retry,
+          processedConfig.method ?? method
+        );
+
+        // --- Response interceptors (run once after retry loop) ---
+        const processedResponse =
+          await this.interceptors.response.run(retryPromise);
+
+        // --- Parse response ---
+        const data = await parseResponse(
+          processedResponse,
+          processedConfig.responseType
+        );
+
+        // --- Cache set ---
+        if (cacheKey) {
+          const ttl =
+            cacheConfig && typeof cacheConfig === 'object'
+              ? cacheConfig.ttl
+              : undefined;
+          this.cacheStore.set(cacheKey, data, processedResponse, ttl);
+        }
+
+        return data as T;
+      } catch (error: unknown) {
+        // Cleanup dedupe entry on error
+        if (dedupeKey) {
+          this._pending.delete(dedupeKey);
+        }
+
+        throw error;
+      } finally {
+        // Cleanup dedupe entry
+        if (dedupeKey) {
+          this._pending.delete(dedupeKey);
+        }
+      }
     } finally {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-      if (dedupeKey) {
-        this._pending.delete(dedupeKey);
-      }
+      // Release concurrency slot
+      this.concurrency.release();
     }
   }
 

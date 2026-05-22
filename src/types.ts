@@ -19,6 +19,43 @@ export type ResponseType =
   | 'formData';
 
 /**
+ * Progress event for upload/download tracking
+ */
+export interface ProgressEvent {
+  loaded: number;
+  total?: number;
+  percent?: number;
+}
+
+/**
+ * Retry configuration
+ */
+export interface RetryConfig {
+  /** Maximum retry count (0 = disabled). Default: 0 */
+  retries?: number;
+  /** Initial retry delay in ms. Default: 1000 */
+  delay?: number;
+  /** Maximum retry delay cap in ms. Default: 30000 */
+  maxDelay?: number;
+  /** HTTP methods to retry on. Default: ['GET', 'HEAD'] */
+  methods?: HttpMethod[];
+  /** Custom retry condition. Default: network errors + 5xx */
+  condition?: (_error: FetchXError, _attempt: number) => boolean;
+}
+
+/**
+ * Cache configuration
+ */
+export interface CacheConfig {
+  /** TTL in ms. Default: 60000 */
+  ttl?: number;
+  /** Maximum cache entries. Default: 100 */
+  maxSize?: number;
+  /** HTTP methods to cache. Default: ['GET'] */
+  methods?: HttpMethod[];
+}
+
+/**
  * Global configuration for a FetchX instance
  */
 export interface FetchXConfig {
@@ -29,6 +66,12 @@ export interface FetchXConfig {
   validateStatus?: (_status: number) => boolean;
   responseType?: ResponseType;
   dedupe?: boolean;
+  /** Retry configuration. Falsy = no retry */
+  retry?: RetryConfig | false;
+  /** Cache configuration. `false` explicitly disables cache */
+  cache?: CacheConfig | false;
+  /** Max concurrent in-flight requests. 0 = unlimited */
+  maxConcurrency?: number;
 }
 
 /**
@@ -41,6 +84,8 @@ export interface RequestOptions extends Partial<FetchXConfig> {
   method?: string;
   signal?: AbortSignal;
   cancelToken?: CancelToken;
+  onDownloadProgress?: (_event: ProgressEvent) => void;
+  onUploadProgress?: (_event: ProgressEvent) => void;
 }
 
 /**
@@ -82,6 +127,7 @@ export interface FetchXResponse<T = unknown> {
 export class FetchXError extends Error {
   readonly config?: RequestOptions;
   readonly code?: string;
+  readonly status?: number;
   readonly request?: unknown;
   readonly response?: FetchXResponse;
   readonly isAxiosError = true;
@@ -91,13 +137,15 @@ export class FetchXError extends Error {
     message: string,
     config?: RequestOptions,
     code?: string,
-    request?: unknown
+    request?: unknown,
+    status?: number
   ) {
     super(message);
     this.name = 'FetchXError';
     this.config = config;
     this.code = code;
     this.request = request;
+    this.status = status;
   }
 }
 
@@ -114,6 +162,17 @@ export type RequestInterceptor = (
 export type ResponseInterceptor = (
   _response: Response
 ) => Promise<Response> | Response;
+
+/**
+ * Cache manager public API exposed on FetchXInstance.cache
+ */
+export interface CacheManager {
+  clear: () => void;
+  delete: (_key: string) => boolean;
+  has: (_key: string) => boolean;
+  get: <T = unknown>(_key: string) => T | undefined;
+  readonly size: number;
+}
 
 /**
  * FetchX instance public API
@@ -142,4 +201,5 @@ export interface FetchXInstance {
     _options?: RequestOptions
   ) => Promise<T>;
   head: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
+  cache: CacheManager;
 }
