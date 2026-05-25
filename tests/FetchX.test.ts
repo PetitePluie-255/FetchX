@@ -1,6 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFetchX } from '../src/FetchX';
 import { FetchXError, CancelToken } from '../src/types';
+import { FetchXStream } from '../src/stream';
+
+// Helper: create a ReadableStream<Uint8Array> for mock fetch responses
+function mockStreamBody(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  let i = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (i < chunks.length) {
+        controller.enqueue(encoder.encode(chunks[i]));
+        i++;
+      } else {
+        controller.close();
+      }
+    },
+  });
+}
 
 const mockFetch = vi.fn();
 
@@ -56,7 +73,7 @@ describe('FetchX', () => {
           headers: expect.any(Headers),
         })
       );
-      expect(result).toEqual(mockData);
+      expect(result.data).toEqual(mockData);
     });
 
     it('should support query params', async () => {
@@ -100,10 +117,10 @@ describe('FetchX', () => {
           body: JSON.stringify(postBody),
         })
       );
-      expect(result).toEqual(mockResponse);
+      expect(result.data).toEqual(mockResponse);
     });
 
-    it('should support FormData body', async () => {
+    it('should support FormData body and not set Content-Type', async () => {
       const formData = new FormData();
       formData.append('name', 'Test');
 
@@ -118,6 +135,9 @@ describe('FetchX', () => {
       const api = createFetchX();
       await api.post('/upload', formData);
 
+      const callArgs = mockFetch.mock.calls[0] as [string, RequestInit];
+      const reqHeaders = callArgs[1].headers as Headers;
+
       expect(mockFetch).toHaveBeenCalledWith(
         '/upload',
         expect.objectContaining({
@@ -125,6 +145,8 @@ describe('FetchX', () => {
           body: formData,
         })
       );
+      // B1: Content-Type must NOT be set for FormData bodies
+      expect(reqHeaders.get('content-type')).toBeNull();
     });
   });
 
@@ -149,7 +171,7 @@ describe('FetchX', () => {
           body: JSON.stringify(putBody),
         })
       );
-      expect(result).toEqual(putBody);
+      expect(result.data).toEqual(putBody);
     });
   });
 
@@ -195,7 +217,7 @@ describe('FetchX', () => {
           body: JSON.stringify(patchBody),
         })
       );
-      expect(result).toEqual(patchBody);
+      expect(result.data).toEqual(patchBody);
     });
   });
 
@@ -271,7 +293,7 @@ describe('FetchX', () => {
       });
 
       const result = await api.get('/fast');
-      expect(result).toEqual({ data: 'ok' });
+      expect(result.data).toEqual({ data: 'ok' });
     });
   });
 
@@ -375,7 +397,7 @@ describe('FetchX', () => {
 
       const api = createFetchX();
       const result = await api.get('/text');
-      expect(result).toBe('plain text');
+      expect(result.data).toBe('plain text');
     });
 
     it('should handle blob response', async () => {
@@ -390,7 +412,7 @@ describe('FetchX', () => {
 
       const api = createFetchX();
       const result = await api.get('/blob');
-      expect(result).toBe(blob);
+      expect(result.data).toBe(blob);
     });
   });
 
@@ -409,7 +431,7 @@ describe('FetchX', () => {
         validateStatus: (status: number) => status < 500,
       });
       const result = await api.get('/not-found');
-      expect(result).toEqual(notFoundData);
+      expect(result.data).toEqual(notFoundData);
     });
 
     it('should still reject with default validator', async () => {
@@ -439,7 +461,7 @@ describe('FetchX', () => {
       const result = await api.get('/not-modified', {
         validateStatus: (status: number) => status === 304,
       });
-      expect(result).toBeInstanceOf(Blob);
+      expect(result.data).toBeInstanceOf(Blob);
     });
   });
 
@@ -457,7 +479,7 @@ describe('FetchX', () => {
 
       const api = createFetchX({ responseType: 'text' });
       const result = await api.get('/data');
-      expect(result).toBe(textData);
+      expect(result.data).toBe(textData);
     });
 
     it('should force blob parsing', async () => {
@@ -473,7 +495,7 @@ describe('FetchX', () => {
 
       const api = createFetchX({ responseType: 'blob' });
       const result = await api.get('/file');
-      expect(result).toBe(blob);
+      expect(result.data).toBe(blob);
     });
 
     it('should support per-request responseType override', async () => {
@@ -489,7 +511,33 @@ describe('FetchX', () => {
 
       const api = createFetchX();
       const result = await api.get('/text', { responseType: 'text' });
-      expect(result).toBe(textData);
+      expect(result.data).toBe(textData);
+    });
+
+    it('should return FetchXResponse with data, status, headers, config', async () => {
+      const mockData = { id: 1 };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        statusText: 'Created',
+        headers: new Headers({
+          'content-type': 'application/json',
+          'x-request-id': 'abc',
+        }),
+        json: () => Promise.resolve(mockData),
+      });
+
+      const api = createFetchX({ baseURL: 'https://api.example.com' });
+      const result = await api.get('/users');
+
+      expect(result.data).toEqual(mockData);
+      expect(result.status).toBe(201);
+      expect(result.statusText).toBe('Created');
+      expect(result.headers).toBeInstanceOf(Headers);
+      expect(result.headers.get('x-request-id')).toBe('abc');
+      expect(result.config).toBeDefined();
+      expect(result.config.method).toBe('GET');
+      expect(result.config.url).toBe('/users');
     });
   });
 
@@ -513,7 +561,7 @@ describe('FetchX', () => {
         '/users',
         expect.objectContaining({ method: 'GET' })
       );
-      expect(result).toEqual({ id: 1 });
+      expect(result.data).toEqual({ id: 1 });
     });
 
     it('should make a POST request via request()', async () => {
@@ -540,7 +588,7 @@ describe('FetchX', () => {
           body: JSON.stringify(postBody),
         })
       );
-      expect(result).toEqual({ id: 1 });
+      expect(result.data).toEqual({ id: 1 });
     });
 
     it('should default to GET when no method is specified', async () => {
@@ -631,7 +679,7 @@ describe('FetchX', () => {
       const second = api.get('/dedupe-test');
 
       const secondResult = await second;
-      expect(secondResult).toEqual({ data: 'second' });
+      expect(secondResult.data).toEqual({ data: 'second' });
 
       await expect(first).rejects.toThrow('Request canceled');
       expect(firstAborted).toBe(true);
@@ -657,8 +705,131 @@ describe('FetchX', () => {
 
       const [a, b] = await Promise.all([api.get('/url-a'), api.get('/url-b')]);
 
-      expect(a).toEqual({ data: 'a' });
-      expect(b).toEqual({ data: 'b' });
+      expect(a.data).toEqual({ data: 'a' });
+      expect(b.data).toEqual({ data: 'b' });
+    });
+  });
+
+  describe('streaming', () => {
+    it('should return ReadableStream for responseType: "stream"', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['hello', 'world']), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'content-type': 'application/octet-stream' }),
+        })
+      );
+
+      const api = createFetchX();
+      const result = await api.get('/file', { responseType: 'stream' });
+
+      expect(result.data).toBeInstanceOf(ReadableStream);
+      expect(result.status).toBe(200);
+
+      // Read the stream to verify content
+      const reader = (result.data as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value);
+      }
+      expect(text).toBe('helloworld');
+    });
+
+    it('should stream raw Uint8Array via api.stream()', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['chunk1', 'chunk2']), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers(),
+        })
+      );
+
+      const api = createFetchX();
+      const stream = await api.stream('/download');
+
+      expect(stream).toBeInstanceOf(FetchXStream);
+      expect(stream.response.status).toBe(200);
+
+      const decoder = new TextDecoder();
+      const parts: string[] = [];
+      for await (const chunk of stream) {
+        parts.push(decoder.decode(chunk));
+      }
+
+      expect(parts).toEqual(['chunk1', 'chunk2']);
+    });
+
+    it('should parse SSE events via api.sse()', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          mockStreamBody(['data: {"msg":"hi"}\n\n', 'data: [DONE]\n\n']),
+          { status: 200, statusText: 'OK', headers: new Headers() }
+        )
+      );
+
+      const api = createFetchX();
+      const stream = await api.sse('/chat');
+
+      expect(stream).toBeInstanceOf(FetchXStream);
+
+      const events: Array<{ data: string }> = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      expect(events[0].data).toBe('{"msg":"hi"}');
+    });
+
+    it('should parse NDJSON via api.ndjson()', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['{"id":1}\n', '{"id":2}\n']), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({
+            'content-type': 'application/x-ndjson',
+          }),
+        })
+      );
+
+      const api = createFetchX();
+      const stream = await api.ndjson<{ id: number }>('/logs/stream');
+
+      const entries: Array<{ id: number }> = [];
+      for await (const entry of stream) {
+        entries.push(entry);
+      }
+
+      expect(entries).toHaveLength(2);
+      expect(entries[0]).toEqual({ id: 1 });
+      expect(entries[1]).toEqual({ id: 2 });
+    });
+
+    it('should NOT throw on HTTP error for SSE stream', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['data: {"error":"unauthorized"}\n\n']), {
+          status: 401,
+          statusText: 'Unauthorized',
+          headers: new Headers(),
+        })
+      );
+
+      const api = createFetchX();
+      const stream = await api.sse('/chat');
+
+      expect(stream.response.status).toBe(401);
+      expect(stream.response.ok).toBe(false);
+
+      const events: Array<{ data: string }> = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      expect(events).toHaveLength(1);
+      expect(events[0].data).toBe('{"error":"unauthorized"}');
     });
   });
 });

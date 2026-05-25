@@ -209,31 +209,41 @@ P0 — Bug 修复是发布的前置条件。详见 [BUGS.md](./BUGS.md)。
 
 ---
 
-## v2.0 — React / Vue 集成 🔮 计划中
+## v2.0 — 插件架构 🔮 计划中
 
 ### 目标
 
-提供声明式数据获取 Hooks / Composables，覆盖主流前端框架。
+提供 `api.use(plugin)` 插件化扩展机制，让 React/Vue 集成、XHR 降级等能力脱离核心库，作为独立 npm 包发布。保持 FetchX 核心零依赖、聚焦 HTTP。
+
+### 插件钩子
+
+插件通过钩子（hooks）介入请求生命周期：
+
+| 钩子         | 触发时机                 | 用途                        |
+| ------------ | ------------------------ | --------------------------- |
+| `onInit`     | 实例创建时               | 注入能力（如 adapter 替换） |
+| `onRequest`  | 请求发出前（拦截器之后） | 修改配置、添加头            |
+| `onResponse` | 收到响应后（解析之前）   | 响应变换、埋点              |
+| `onError`    | 请求出错时               | 错误上报、重试              |
+| `onStream`   | 流式请求建立时           | 流式数据钩子                |
 
 ### 计划功能
 
-**React**：
+- **`api.use(plugin)`** — 注册插件，返回卸载函数
+- **插件优先级** — 控制执行顺序
+- **请求级插件** — `api.get(url, { plugins: [...] })`
 
-- **useRequest**：自动管理 data / loading / error 状态
-  - `manual` 模式：手动触发
-  - `refreshDeps`：依赖变化自动重新请求
-  - `cancel`：组件卸载自动取消
-- **useMutation**：手动触发的变更操作（POST/PUT/DELETE）
+### 官方插件生态
 
-**Vue**：
-
-- **useRequest**：Vue Composable，ref-based 响应式状态
-  - `manual` 模式 / `refreshDeps` / 自动取消，与 React 版本语义对齐
-- **useMutation**：变更操作 Composable
+| 插件            | 包名                              | 说明                         |
+| --------------- | --------------------------------- | ---------------------------- |
+| React hooks     | `@petite-pluie/fetchx-react`      | `useRequest` / `useMutation` |
+| Vue composables | `@petite-pluie/fetchx-vue`        | `useRequest` / `useMutation` |
+| XHR 上传进度    | `@petite-pluie/fetchx-xhr-upload` | 非流式环境降级               |
 
 ### 优先级
 
-P2 — 框架集成在核心库稳定后再推进。
+P1 — 插件架构是生态扩展的基石，是框架集成和 XHR 降级的前置依赖。
 
 ---
 
@@ -261,11 +271,10 @@ P2 — 复杂场景需求，可延后。
 
 ### 目标
 
-满足大型项目 / 微前端架构的需求。
+满足大型项目 / 微前端架构的需求，通过插件生态交付。
 
 ### 计划功能
 
-- 插件化架构：通过 `api.use(plugin)` 横向扩展
 - GraphQL 适配器
 - WebSocket 集成
 - 请求链路追踪 & 性能监控
@@ -279,59 +288,16 @@ P2 — 大规模项目需求，按需推进。
 
 ---
 
-## v3.1 — 非流式上传进度插件 🔮 计划中
-
-### 目标
-
-针对非流式上传场景，通过 XHR 降级实现可靠的上传进度检测。当运行时不支持 `ReadableStream + duplex: 'half'` 时，自动切换为 XHR 实现，确保上传进度跟踪全覆盖。
-
-### 背景
-
-v1.3 的上传进度依赖 `ReadableStream` + `duplex: 'half'` 方案，部分旧浏览器 / Node.js 18 以下环境不支持。该插件基于 `XHR` 的 `upload.onprogress` 事件提供降级方案，同时还能弥补当前流式方案无法跟踪 `FormData` 上传进度的缺陷。
-
-### 计划功能
-
-- **`UploadProgressPlugin`** — 通过插件系统注册，非侵入式注入
-- **自动降级策略** — 检测运行时是否支持流式上传：
-  - 支持 → 使用 `ReadableStream` 原生方案（v1.3）
-  - 不支持 → 自动切换 XHR 降级
-  - 也可通过配置强制使用 XHR
-- **XHR 实现** — 构造 `XMLHttpRequest`，代理 `upload.onprogress`，手动设置请求头/超时/响应解析
-- **透明回调** — API 层面的 `onUploadProgress` 回调签名不变，上层无感知
-- **FormData 支持** — XHR 原生支持 `FormData` 进度跟踪，弥补流式方案缺口
-- **取消兼容** — XHR 的 `abort()` 与现有 `AbortSignal` / `CancelToken` 衔接
-
-### API 预览
-
-```typescript
-import { UploadProgressPlugin } from '@petite-pluie/fetchx';
-
-const api = createFetchX({ baseURL: '...' });
-api.use(UploadProgressPlugin({ force: false }));
-
-// 使用方式与 v1.3 完全一致，插件自动决定是否降级
-await api.post('/upload', formData, {
-  onUploadProgress: e => console.log(`${e.percent}%`),
-});
-```
-
-### 优先级
-
-P2 — 插件形式提供，作为流式上传方案的兼容性兜底。
-
----
-
 ## 版本总览
 
-| 版本 | 主题               | 状态        |
-| ---- | ------------------ | ----------- |
-| v1.0 | 基础 HTTP 客户端   | ✅ 已完成   |
-| v1.1 | 拦截器增强         | ✅ 已完成   |
-| v1.2 | 请求/响应控制增强  | ✅ 已完成   |
-| v1.3 | 高级请求特性       | ✅ 已完成   |
-| v1.4 | 通用流式封装       | 🔜 方案已定 |
-| v1.5 | 核心缺陷修复       | 🔜 计划中   |
-| v2.0 | React / Vue 集成   | 🔮 计划中   |
-| v2.1 | 高级数据管理       | 🔮 计划中   |
-| v3.0 | 企业级特性         | 🔮 计划中   |
-| v3.1 | 非流式上传进度插件 | 🔮 计划中   |
+| 版本 | 主题              | 状态      |
+| ---- | ----------------- | --------- |
+| v1.0 | 基础 HTTP 客户端  | ✅ 已完成 |
+| v1.1 | 拦截器增强        | ✅ 已完成 |
+| v1.2 | 请求/响应控制增强 | ✅ 已完成 |
+| v1.3 | 高级请求特性      | ✅ 已完成 |
+| v1.4 | 通用流式封装      | ✅ 已完成 |
+| v1.5 | 核心缺陷修复      | ✅ 已完成 |
+| v2.0 | 插件架构          | 🔮 计划中 |
+| v2.1 | 高级数据管理      | 🔮 计划中 |
+| v3.0 | 企业级特性        | 🔮 计划中 |

@@ -145,7 +145,7 @@ describe('Interceptors', () => {
       });
 
       const result = await api.get('/test');
-      expect(result).toEqual({ intercepted: true });
+      expect(result.data).toEqual({ intercepted: true });
     });
 
     it('should execute multiple response interceptors in order', async () => {
@@ -224,7 +224,7 @@ describe('Interceptors', () => {
       );
 
       const result = await api.get('/protected');
-      expect(result).toEqual({ retried: true });
+      expect(result.data).toEqual({ retried: true });
     });
 
     it('should re-throw error from rejected handler', async () => {
@@ -283,7 +283,7 @@ describe('Interceptors', () => {
       });
 
       const result = await api.get('/forbidden');
-      expect(result).toEqual({ recovered: true });
+      expect(result.data).toEqual({ recovered: true });
       expect(order).toEqual(['rejected-1', 'fulfilled-2']);
     });
 

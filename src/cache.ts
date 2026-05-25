@@ -62,6 +62,27 @@ export class CacheStore implements CacheManager {
     return methods.includes(method.toUpperCase() as HttpMethod);
   }
 
+  /**
+   * Get the full cache entry including metadata (status, headers, etc.).
+   * Used internally to reconstruct FetchXResponse on cache hits.
+   * Not exposed on the public CacheManager interface.
+   */
+  getEntry(key: string): CacheEntry | undefined {
+    const entry = this.store.get(key);
+    if (!entry) return undefined;
+
+    if (Date.now() - entry.timestamp > entry.ttl) {
+      this.store.delete(key);
+      return undefined;
+    }
+
+    // Move to end for LRU
+    this.store.delete(key);
+    this.store.set(key, entry);
+
+    return entry;
+  }
+
   get<T = unknown>(key: string): T | undefined {
     const entry = this.store.get(key);
     if (!entry) return undefined;

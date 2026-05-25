@@ -45,6 +45,26 @@ describe('CacheStore', () => {
     expect(store.has(key)).toBe(true);
   });
 
+  it('should getEntry with full metadata', () => {
+    const store = new CacheStore();
+    const key = 'get|/test';
+
+    const mockResponse = new Response(null, {
+      status: 201,
+      statusText: 'Created',
+      headers: new Headers({ 'x-custom': 'hello' }),
+    });
+
+    store.set(key, { data: 'hello' }, mockResponse);
+    const entry = store.getEntry(key);
+
+    expect(entry).toBeDefined();
+    expect(entry?.data).toEqual({ data: 'hello' });
+    expect(entry?.status).toBe(201);
+    expect(entry?.statusText).toBe('Created');
+    expect(entry?.headers['x-custom']).toBe('hello');
+  });
+
   it('should return undefined for missing key', () => {
     const store = new CacheStore();
     expect(store.get('missing')).toBeUndefined();

@@ -2,6 +2,7 @@ import {
   FetchXError,
   type FetchXConfig,
   type FetchXInstance,
+  type FetchXResponse,
   type HttpMethod,
   type ProgressEvent,
   type RequestOptions,
@@ -11,6 +12,7 @@ import {
   ResponseInterceptorManager,
 } from './interceptors';
 import {
+  buildFetchXResponse,
   buildURL,
   isSuccessStatus,
   mergeConfig,
@@ -20,6 +22,13 @@ import {
 import { CacheStore, createCacheKey } from './cache';
 import { ConcurrencyManager } from './concurrency';
 import { executeWithRetry } from './retry';
+import {
+  Uint8ArrayStream,
+  SSEStream,
+  NDJSONStream,
+  type FetchXStream,
+  type SSEEvent,
+} from './stream';
 import {
   trackDownloadProgress,
   trackUploadProgress,
@@ -101,7 +110,9 @@ export class FetchX {
   /**
    * Generic request method (axios-style single config object)
    */
-  async request<T = unknown>(options: RequestOptions): Promise<T> {
+  async request<T = unknown>(
+    options: RequestOptions
+  ): Promise<FetchXResponse<T>> {
     const { method = 'GET', url = '', body, ...rest } = options;
     return this._request<T>(method as HttpMethod, url, body, rest);
   }
@@ -114,7 +125,7 @@ export class FetchX {
     url: string,
     body?: unknown,
     options: RequestOptions = {}
-  ): Promise<T> {
+  ): Promise<FetchXResponse<T>> {
     // Merge global config with per-request options
     const merged = mergeConfig(this.config, options);
 
@@ -151,9 +162,15 @@ export class FetchX {
         processedConfig.params,
         processedConfig.body
       );
-      const cached = this.cacheStore.get<T>(cacheKey);
-      if (cached !== undefined) {
-        return cached;
+      const cacheEntry = this.cacheStore.getEntry(cacheKey);
+      if (cacheEntry !== undefined) {
+        return {
+          data: cacheEntry.data as T,
+          status: cacheEntry.status,
+          statusText: cacheEntry.statusText,
+          headers: new Headers(cacheEntry.headers),
+          config: processedConfig,
+        } satisfies FetchXResponse<T>;
       }
     }
 
@@ -237,6 +254,11 @@ export class FetchX {
             try {
               // Build headers
               const headers = new Headers(processedConfig.headers ?? {});
+              // B1: For FormData, remove Content-Type so the browser auto-sets
+              // the correct multipart/form-data boundary header
+              if (serializedBody instanceof FormData) {
+                headers.delete('content-type');
+              }
 
               // Wrap body for upload progress (if requested)
               const { body: uploadBody, duplex: d } = trackUploadProgress(
@@ -342,14 +364,26 @@ export class FetchX {
         const processedResponse =
           await this.interceptors.response.run(retryPromise);
 
-        // --- Parse response ---
-        const data = await parseResponse(
+        // --- Parse response (skip for stream type) ---
+        let data: unknown;
+        if (processedConfig.responseType === 'stream') {
+          data = processedResponse.body;
+        } else {
+          data = await parseResponse(
+            processedResponse,
+            processedConfig.responseType
+          );
+        }
+
+        // --- Build response ---
+        const response = buildFetchXResponse(
+          data as T,
           processedResponse,
-          processedConfig.responseType
+          processedConfig
         );
 
-        // --- Cache set ---
-        if (cacheKey) {
+        // --- Cache set (skip for stream — cannot cache a ReadableStream) ---
+        if (cacheKey && processedConfig.responseType !== 'stream') {
           const ttl =
             cacheConfig && typeof cacheConfig === 'object'
               ? cacheConfig.ttl
@@ -357,7 +391,7 @@ export class FetchX {
           this.cacheStore.set(cacheKey, data, processedResponse, ttl);
         }
 
-        return data as T;
+        return response;
       } catch (error: unknown) {
         // Cleanup dedupe entry on error
         if (dedupeKey) {
@@ -380,7 +414,10 @@ export class FetchX {
   /**
    * GET request
    */
-  async get<T = unknown>(url: string, options?: RequestOptions): Promise<T> {
+  async get<T = unknown>(
+    url: string,
+    options?: RequestOptions
+  ): Promise<FetchXResponse<T>> {
     return this._request<T>('GET', url, undefined, options);
   }
 
@@ -391,7 +428,7 @@ export class FetchX {
     url: string,
     body?: unknown,
     options?: RequestOptions
-  ): Promise<T> {
+  ): Promise<FetchXResponse<T>> {
     return this._request<T>('POST', url, body, options);
   }
 
@@ -402,14 +439,17 @@ export class FetchX {
     url: string,
     body?: unknown,
     options?: RequestOptions
-  ): Promise<T> {
+  ): Promise<FetchXResponse<T>> {
     return this._request<T>('PUT', url, body, options);
   }
 
   /**
    * DELETE request
    */
-  async delete<T = unknown>(url: string, options?: RequestOptions): Promise<T> {
+  async delete<T = unknown>(
+    url: string,
+    options?: RequestOptions
+  ): Promise<FetchXResponse<T>> {
     return this._request<T>('DELETE', url, undefined, options);
   }
 
@@ -420,15 +460,211 @@ export class FetchX {
     url: string,
     body?: unknown,
     options?: RequestOptions
-  ): Promise<T> {
+  ): Promise<FetchXResponse<T>> {
     return this._request<T>('PATCH', url, body, options);
   }
 
   /**
    * HEAD request
    */
-  async head<T = unknown>(url: string, options?: RequestOptions): Promise<T> {
+  async head<T = unknown>(
+    url: string,
+    options?: RequestOptions
+  ): Promise<FetchXResponse<T>> {
     return this._request<T>('HEAD', url, undefined, options);
+  }
+
+  // ────────────────────────────────────────────
+  //  Streaming methods (v1.4)
+  // ────────────────────────────────────────────
+
+  /**
+   * Internal shared pipeline for streaming requests.
+   * Reuses mergeConfig, request interceptors, buildURL, serializeBody,
+   * signals, and timeout. Skips cache, retry, dedupe, concurrency,
+   * validateStatus, response interceptors, and parseResponse.
+   */
+  private async _streamRequest(
+    method: HttpMethod,
+    url: string,
+    body?: unknown,
+    options: RequestOptions = {}
+  ): Promise<{ response: Response; config: RequestOptions }> {
+    // Merge config
+    const merged = mergeConfig(this.config, options);
+
+    // Build request config for interceptors
+    const requestConfig: RequestOptions = {
+      method,
+      url,
+      body,
+      ...merged,
+    };
+
+    // Run request interceptors (token injection etc.)
+    const processedConfig = await this.interceptors.request.run(requestConfig);
+
+    // Build URL
+    const fullURL = buildURL(
+      processedConfig.baseURL ?? '',
+      processedConfig.url ?? url,
+      processedConfig.params
+    );
+
+    // Serialize body
+    const serializedBody = serializeBody(processedConfig.body);
+
+    // Build headers
+    const headers = new Headers(processedConfig.headers ?? {});
+    if (serializedBody instanceof FormData) {
+      headers.delete('content-type');
+    }
+
+    // Wrap body for upload progress
+    const { body: uploadBody } = trackUploadProgress(
+      serializedBody,
+      processedConfig.onUploadProgress
+    );
+
+    // Set up abort controller (connection timeout only)
+    const controller = new AbortController();
+    const userSignal = processedConfig.signal;
+    const cancelSignal = processedConfig.cancelToken?.signal;
+    const timeout = processedConfig.timeout ?? 0;
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeout > 0) {
+      timeoutId = setTimeout(() => controller.abort(), timeout);
+    }
+
+    // Chain external signals to our controller
+    const onExternalAbort = () => controller.abort();
+    userSignal?.addEventListener('abort', onExternalAbort, { once: true });
+    cancelSignal?.addEventListener('abort', onExternalAbort, { once: true });
+
+    try {
+      const response = await fetch(fullURL, {
+        method: processedConfig.method ?? method,
+        headers,
+        body: uploadBody as BodyInit | undefined,
+        signal: controller.signal,
+        credentials: processedConfig.credentials,
+      });
+
+      return { response, config: processedConfig };
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        if (
+          controller.signal.aborted &&
+          !userSignal?.aborted &&
+          !cancelSignal?.aborted
+        ) {
+          throw new FetchXError(
+            'Timeout exceeded',
+            processedConfig,
+            'ECONNABORTED'
+          );
+        }
+        throw new FetchXError(
+          'Request canceled',
+          processedConfig,
+          'ERR_CANCELED'
+        );
+      }
+
+      throw new FetchXError(
+        error instanceof Error ? error.message : 'Network Error',
+        processedConfig,
+        'ERR_NETWORK'
+      );
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      userSignal?.removeEventListener('abort', onExternalAbort);
+      cancelSignal?.removeEventListener('abort', onExternalAbort);
+    }
+  }
+
+  /**
+   * Raw Uint8Array stream. Defaults to GET.
+   *
+   * ```ts
+   * const stream = api.stream('/download');
+   * for await (const chunk of stream) { ... }
+   * ```
+   */
+  async stream(
+    url: string,
+    options?: RequestOptions
+  ): Promise<FetchXStream<Uint8Array>> {
+    const merged = { method: 'GET' as HttpMethod, ...options };
+    const { method = 'GET', body, ...rest } = merged;
+    const { response, config } = await this._streamRequest(
+      method as HttpMethod,
+      url,
+      body,
+      rest
+    );
+    const controller = new AbortController();
+    return new Uint8ArrayStream(response, config, controller);
+  }
+
+  /**
+   * SSE (Server-Sent Events) stream. Defaults to POST with
+   * `Accept: text/event-stream` and `Content-Type: application/json`.
+   *
+   * ```ts
+   * const stream = api.sse('/chat/completions', { body: { messages } });
+   * for await (const event of stream) {
+   *   const chunk = JSON.parse(event.data);
+   * }
+   * ```
+   */
+  async sse(
+    url: string,
+    options?: RequestOptions
+  ): Promise<FetchXStream<SSEEvent>> {
+    const merged = {
+      method: 'POST' as HttpMethod,
+      headers: {
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json',
+      },
+      ...options,
+    };
+    const { method = 'POST', body, ...rest } = merged;
+    const { response, config } = await this._streamRequest(
+      method as HttpMethod,
+      url,
+      body,
+      rest
+    );
+    const controller = new AbortController();
+    return new SSEStream(response, config, controller);
+  }
+
+  /**
+   * NDJSON (Newline-Delimited JSON) stream. Defaults to GET.
+   *
+   * ```ts
+   * const stream = api.ndjson<LogEntry>('/logs/stream');
+   * for await (const entry of stream) { ... }
+   * ```
+   */
+  async ndjson<T = unknown>(
+    url: string,
+    options?: RequestOptions
+  ): Promise<FetchXStream<T>> {
+    const merged = { method: 'GET' as HttpMethod, ...options };
+    const { method = 'GET', body, ...rest } = merged;
+    const { response, config } = await this._streamRequest(
+      method as HttpMethod,
+      url,
+      body,
+      rest
+    );
+    const controller = new AbortController();
+    return new NDJSONStream<T>(response, config, controller);
   }
 }
 

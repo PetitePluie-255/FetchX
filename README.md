@@ -19,6 +19,8 @@
 - **并发控制** — 限制同时发起的请求数量
 - **进度监听** — 上传/下载进度回调
 - **防抖/节流** — `debounceRequest` / `throttleRequest` 工具函数
+- **流式请求** — SSE / NDJSON / 原始 Uint8Array 流，`for await...of` 消费
+- **响应流访问** — `responseType: 'stream'` 获取原始 ReadableStream
 - **自动解析** — 根据 Content-Type 自动解析 json/text/blob/form-data
 - **错误分类** — `FetchXError` 明确区分网络、超时、取消、HTTP、不支持
 
@@ -120,7 +122,7 @@ const text = await api.get('/api.json', { responseType: 'text' });
 const buffer = await api.get('/file', { responseType: 'arrayBuffer' });
 ```
 
-支持：`'json'` | `'text'` | `'blob'` | `'arrayBuffer'` | `'formData'`
+支持：`'json'` | `'text'` | `'blob'` | `'arrayBuffer'` | `'formData'` | `'stream'`
 
 ### `api.request(config)` — 通用请求方法
 
@@ -255,6 +257,78 @@ search('/search?q=a');
 search('/search?q=ab');
 search('/search?q=abc'); // ← 只有这个会实际发出请求
 ```
+
+## 流式请求
+
+FetchX 提供三种流式请求方法，均返回 `FetchXStream<T>` 对象，支持 `for await...of` 消费。
+
+### SSE（Server-Sent Events）
+
+```typescript
+// AI Chat 流式调用（默认 POST + JSON body）
+const stream = api.sse('/chat/completions', {
+  body: { model: 'gpt-4', messages: [...] },
+});
+
+// HTTP 错误不抛异常，通过 stream.response 检查
+if (!stream.response.ok) {
+  throw new Error(`SSE 连接失败: ${stream.response.status}`);
+}
+
+for await (const event of stream) {
+  // event: { data: string, event?: string, id?: string, retry?: number }
+  if (event.data === '[DONE]') break;
+  const chunk = JSON.parse(event.data);
+  console.log(chunk);
+}
+```
+
+### NDJSON（Newline-Delimited JSON）
+
+```typescript
+const stream = api.ndjson<LogEntry>('/logs/stream');
+
+for await (const entry of stream) {
+  // entry 已是 LogEntry 类型
+  console.log(entry.timestamp);
+}
+```
+
+### 原始流（Uint8Array）
+
+```typescript
+const stream = api.stream('/download');
+
+const decoder = new TextDecoder();
+for await (const chunk of stream) {
+  // chunk: Uint8Array
+  console.log(decoder.decode(chunk, { stream: true }));
+}
+```
+
+### `responseType: 'stream'`
+
+通过现有 API 获取原始 ReadableStream，正常走拦截器等管线：
+
+```typescript
+const result = await api.get('/large-file', { responseType: 'stream' });
+// result.data: ReadableStream<Uint8Array>
+// result.status: number
+// result.headers: Headers
+
+const reader = (result.data as ReadableStream<Uint8Array>).getReader();
+// ...
+```
+
+### FetchXStream API
+
+| 属性/方法         | 说明                                      |
+| ----------------- | ----------------------------------------- |
+| `stream.response` | 原始 `Response` 对象（status/headers/ok） |
+| `stream.abort()`  | 取消流，自动释放 reader                   |
+| `for await...of`  | 异步迭代消费                              |
+
+> **注意**：流式请求不走响应拦截器（避免拦截器消费 body），但请求拦截器正常执行。不支持缓存/重试/去重。
 
 ## 拦截器
 
@@ -397,11 +471,15 @@ interface User {
 }
 
 // 指定响应类型
-const user = await api.get<User>('/users/1');
+const { data: user } = await api.get<User>('/users/1');
 // user: User
 
-const users = await api.get<User[]>('/users');
+const { data: users } = await api.get<User[]>('/users');
 // users: User[]
+
+// 访问响应元数据
+const result = await api.get<User>('/users/1');
+console.log(result.status, result.headers, result.config);
 ```
 
 ### 导出的类型
@@ -420,12 +498,14 @@ import type {
   CacheConfig,
   CacheManager,
   ProgressEvent,
+  SSEEvent,
 } from '@petite-pluie/fetchx';
 import {
   FetchXError,
   isCancel,
   createFetchX,
   CancelToken,
+  FetchXStream,
   debounceRequest,
   throttleRequest,
   isStreamingUploadSupported,
@@ -444,39 +524,42 @@ function createFetchX(config?: FetchXConfig): FetchXInstance;
 
 ### `FetchXInstance`
 
-| 方法 / 属性 | 签名                                                       |
-| ----------- | ---------------------------------------------------------- |
-| `get`       | `<T>(url, options?) => Promise<T>`                         |
-| `post`      | `<T>(url, body?, options?) => Promise<T>`                  |
-| `put`       | `<T>(url, body?, options?) => Promise<T>`                  |
-| `delete`    | `<T>(url, options?) => Promise<T>`                         |
-| `patch`     | `<T>(url, body?, options?) => Promise<T>`                  |
-| `head`      | `<T>(url, options?) => Promise<T>`                         |
-| `request`   | `<T>(config: RequestOptions) => Promise<T>`                |
-| `cache`     | `CacheManager` — 缓存管理对象（clear/delete/has/get/size） |
+| 方法 / 属性 | 签名                                                        |
+| ----------- | ----------------------------------------------------------- |
+| `get`       | `<T>(url, options?) => Promise<FetchXResponse<T>>`          |
+| `post`      | `<T>(url, body?, options?) => Promise<FetchXResponse<T>>`   |
+| `put`       | `<T>(url, body?, options?) => Promise<FetchXResponse<T>>`   |
+| `delete`    | `<T>(url, options?) => Promise<FetchXResponse<T>>`          |
+| `patch`     | `<T>(url, body?, options?) => Promise<FetchXResponse<T>>`   |
+| `head`      | `<T>(url, options?) => Promise<FetchXResponse<T>>`          |
+| `request`   | `<T>(config: RequestOptions) => Promise<FetchXResponse<T>>` |
+| `stream`    | `(url, options?) => Promise<FetchXStream<Uint8Array>>`      |
+| `sse`       | `(url, options?) => Promise<FetchXStream<SSEEvent>>`        |
+| `ndjson`    | `<T>(url, options?) => Promise<FetchXStream<T>>`            |
+| `cache`     | `CacheManager` — 缓存管理对象（clear/delete/has/get/size）  |
 
 #### `RequestOptions`
 
-| 字段                 | 类型                                                        | 说明                       |
-| -------------------- | ----------------------------------------------------------- | -------------------------- |
-| `url`                | `string`                                                    | 请求路径（相对于 baseURL） |
-| `method`             | `string`                                                    | HTTP 方法                  |
-| `params`             | `Record<string, unknown>`                                   | 查询参数，自动序列化       |
-| `body`               | `unknown`                                                   | 请求体，自动 JSON 序列化   |
-| `headers`            | `Record<string, string>`                                    | 请求头（合并到默认头）     |
-| `timeout`            | `number`                                                    | 本次请求超时时间           |
-| `signal`             | `AbortSignal`                                               | 取消信号                   |
-| `cancelToken`        | `CancelToken`                                               | axios 兼容取消令牌         |
-| `baseURL`            | `string`                                                    | 覆盖实例的 baseURL         |
-| `credentials`        | `RequestCredentials`                                        | 凭证模式                   |
-| `validateStatus`     | `(status: number) => boolean`                               | 自定义成功状态码判定       |
-| `responseType`       | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData'` | 强制响应解析类型           |
-| `dedupe`             | `boolean`                                                   | 是否启用去重               |
-| `cache`              | `CacheConfig \| false`                                      | 请求缓存配置               |
-| `retry`              | `RetryConfig \| false`                                      | 请求重试配置               |
-| `maxConcurrency`     | `number`                                                    | 最大并发请求数             |
-| `onDownloadProgress` | `(e: ProgressEvent) => void`                                | 下载进度回调               |
-| `onUploadProgress`   | `(e: ProgressEvent) => void`                                | 上传进度回调               |
+| 字段                 | 类型                                                                    | 说明                       |
+| -------------------- | ----------------------------------------------------------------------- | -------------------------- |
+| `url`                | `string`                                                                | 请求路径（相对于 baseURL） |
+| `method`             | `string`                                                                | HTTP 方法                  |
+| `params`             | `Record<string, unknown>`                                               | 查询参数，自动序列化       |
+| `body`               | `unknown`                                                               | 请求体，自动 JSON 序列化   |
+| `headers`            | `Record<string, string>`                                                | 请求头（合并到默认头）     |
+| `timeout`            | `number`                                                                | 本次请求超时时间           |
+| `signal`             | `AbortSignal`                                                           | 取消信号                   |
+| `cancelToken`        | `CancelToken`                                                           | axios 兼容取消令牌         |
+| `baseURL`            | `string`                                                                | 覆盖实例的 baseURL         |
+| `credentials`        | `RequestCredentials`                                                    | 凭证模式                   |
+| `validateStatus`     | `(status: number) => boolean`                                           | 自定义成功状态码判定       |
+| `responseType`       | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData' \| 'stream'` | 强制响应解析类型           |
+| `dedupe`             | `boolean`                                                               | 是否启用去重               |
+| `cache`              | `CacheConfig \| false`                                                  | 请求缓存配置               |
+| `retry`              | `RetryConfig \| false`                                                  | 请求重试配置               |
+| `maxConcurrency`     | `number`                                                                | 最大并发请求数             |
+| `onDownloadProgress` | `(e: ProgressEvent) => void`                                            | 下载进度回调               |
+| `onUploadProgress`   | `(e: ProgressEvent) => void`                                            | 上传进度回调               |
 
 ### `FetchXError`
 

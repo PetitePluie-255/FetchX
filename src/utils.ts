@@ -71,6 +71,10 @@ export function serializeBody(
     return body;
   }
 
+  if (body instanceof URLSearchParams) {
+    return body.toString();
+  }
+
   if (typeof body === 'object') {
     return JSON.stringify(body);
   }
@@ -134,7 +138,11 @@ export async function parseResponse(
   if (responseType) {
     switch (responseType) {
       case 'json':
-        return response.json();
+        try {
+          return await response.json();
+        } catch {
+          return null;
+        }
       case 'text':
         return response.text();
       case 'blob':
@@ -151,7 +159,11 @@ export async function parseResponse(
   const contentType = response.headers.get('content-type');
 
   if (contentType?.includes('application/json')) {
-    return response.json() as Promise<unknown>;
+    try {
+      return (await response.json()) as unknown;
+    } catch {
+      return null;
+    }
   }
 
   if (contentType?.includes('text/')) {

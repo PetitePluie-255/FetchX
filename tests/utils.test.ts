@@ -3,6 +3,7 @@ import {
   serializeParams,
   buildURL,
   serializeBody,
+  parseResponse,
   createFetchXError,
   mergeConfig,
   isSuccessStatus,
@@ -132,6 +133,14 @@ describe('Utils', () => {
     it('should convert boolean to string', () => {
       const result = serializeBody(true);
       expect(result).toBe('true');
+    });
+
+    it('should serialize URLSearchParams to string', () => {
+      const params = new URLSearchParams();
+      params.append('name', 'test');
+      params.append('age', '25');
+      const result = serializeBody(params);
+      expect(result).toBe('name=test&age=25');
     });
   });
 
@@ -309,5 +318,26 @@ describe('Utils', () => {
       const error = new FetchXError('Canceled', undefined, 'ERR_CANCELED');
       expect(isCancel(error)).toBe(true);
     });
+  });
+});
+
+describe('parseResponse', () => {
+  it('should return null for empty JSON response body', async () => {
+    // Use status 200 with empty body to simulate the SyntaxError case
+    const response = new Response('', {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+    });
+    const result = await parseResponse(response);
+    expect(result).toBeNull();
+  });
+
+  it('should return null for empty JSON with explicit responseType: json', async () => {
+    const response = new Response('', {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+    });
+    const result = await parseResponse(response, 'json');
+    expect(result).toBeNull();
   });
 });

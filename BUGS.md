@@ -84,20 +84,28 @@
 
 ---
 
-## v1.5 — 核心缺陷修复 🔜 计划中
+## v1.5 — 核心缺陷修复 ✅ 已完成
 
-### 目标
+### 修复内容
 
-修复非流式现存 bug，补齐 TypeScript 类型安全与 API 完整性。
+- **B1** ✅：FormData body 时自动移除 Content-Type 头
+- **B2** ✅：`serializeBody` 增加 `URLSearchParams` 分支
+- **B3** ✅：`parseResponse` 对空 body 的 `response.json()` 降级处理
+- **D1** ✅：响应返回 `FetchXResponse<T>`（数据 + status/headers）
 
-### 计划修复
+## v1.4 已知技术债
 
-- **B1**：FormData body 时自动移除 Content-Type 头
-- **B2**：`serializeBody` 增加 `URLSearchParams` 分支
-- **B3**：`parseResponse` 对空 body 的 `response.json()` 降级处理
-- **D1**：响应返回 `FetchXResponse<T>`（数据 + status/headers）→ 需确认方案
-- 清理 `buildFetchXResponse` 死代码（如采用 D1 修复则激活，否则删除）
+> 非阻塞问题，不影响 v2.0 开发。记录以备后续改进。
 
-### 优先级
+### T1 — FetchXStream abort 信号链路不闭环（低）
 
-P0 — 修复已确认 Bug 是发布的前置条件。D1 方案需单独确认。
+- **现状**：`_streamRequest` 内部将外部 `AbortSignal` 链接到内部 controller，但返回的 `FetchXStream` 使用的是独立的 `AbortController`。`stream.abort()` 能停止流消费，但无法向上游通知调用方。
+- **影响**：调用方用独立 `AbortController` 取消流时，`stream.abort()` 的状态不同步。不影响正常使用场景。
+- **改进方向**：`FetchXStream` 接受外部 signal 引用，双向绑定。
+
+### T2 — FetchXError.response 从未填充（低）
+
+- **文件**：`src/types.ts:132` (`FetchXError.response?: FetchXResponse`)
+- **现状**：HTTP 错误（ERR_BAD_RESPONSE）时，`FetchXError` 有 `status` 字段但 `response` 字段始终为 `undefined`。错误响应体丢失。
+- **影响**：用户无法从错误对象中读取服务端返回的错误详情（如 JSON error body）。需自行通过拦截器处理。
+- **改进方向**：在 `_request` 的 `validateStatus` 失败时，尝试解析响应体并填充 `FetchXError.response`。

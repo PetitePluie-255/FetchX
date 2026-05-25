@@ -2,6 +2,7 @@ import type {
   RequestInterceptorManager,
   ResponseInterceptorManager,
 } from './interceptors';
+import type { FetchXStream, SSEEvent } from './stream';
 
 /**
  * HTTP method union type
@@ -16,7 +17,8 @@ export type ResponseType =
   | 'text'
   | 'blob'
   | 'arrayBuffer'
-  | 'formData';
+  | 'formData'
+  | 'stream';
 
 /**
  * Progress event for upload/download tracking
@@ -182,24 +184,45 @@ export interface FetchXInstance {
     request: RequestInterceptorManager;
     response: ResponseInterceptorManager;
   };
-  request: <T = unknown>(_config: RequestOptions) => Promise<T>;
-  get: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
+  request: <T = unknown>(_config: RequestOptions) => Promise<FetchXResponse<T>>;
+  get: <T = unknown>(
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXResponse<T>>;
   post: <T = unknown>(
     _url: string,
     _body?: unknown,
     _options?: RequestOptions
-  ) => Promise<T>;
+  ) => Promise<FetchXResponse<T>>;
   put: <T = unknown>(
     _url: string,
     _body?: unknown,
     _options?: RequestOptions
-  ) => Promise<T>;
-  delete: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
+  ) => Promise<FetchXResponse<T>>;
+  delete: <T = unknown>(
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXResponse<T>>;
   patch: <T = unknown>(
     _url: string,
     _body?: unknown,
     _options?: RequestOptions
-  ) => Promise<T>;
-  head: <T = unknown>(_url: string, _options?: RequestOptions) => Promise<T>;
+  ) => Promise<FetchXResponse<T>>;
+  head: <T = unknown>(
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXResponse<T>>;
+  stream: (
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXStream<Uint8Array>>;
+  sse: (
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXStream<SSEEvent>>;
+  ndjson: <T = unknown>(
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXStream<T>>;
   cache: CacheManager;
 }
