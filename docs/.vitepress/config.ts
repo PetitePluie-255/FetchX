@@ -7,6 +7,10 @@ export default defineConfig({
   lang: 'zh-CN',
   cleanUrls: true,
 
+  head: [
+    ['link', { rel: 'icon', href: '/favicon.svg' }],
+  ],
+
   themeConfig: {
     logo: '/logo.svg',
 
