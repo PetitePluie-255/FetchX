@@ -1,11 +1,16 @@
 {
   "name": "@petite-pluie/fetchx-logger",
   "version": "0.1.0",
-  "description": "Logger plugin for FetchX HTTP client",
+  "description": "Logger plugin for FetchX HTTP client — request/response/error logging with timing and filters",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PetitePluie-255/FetchX.git"
   },
+  "homepage": "https://github.com/PetitePluie-255/FetchX/tree/main/packages/plugin-logger#readme",
+  "bugs": {
+    "url": "https://github.com/PetitePluie-255/FetchX/issues"
+  },
+  "author": "PetitePluie-255",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
