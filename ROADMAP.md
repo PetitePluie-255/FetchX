@@ -246,11 +246,13 @@ P0 — Bug 修复是发布的前置条件。详见 [BUGS.md](./BUGS.md)。
 
 ### 官方插件生态（规划中）
 
-| 插件            | 包名                              | 说明                         |
-| --------------- | --------------------------------- | ---------------------------- |
-| React hooks     | `@petite-pluie/fetchx-react`      | `useRequest` / `useMutation` |
-| Vue composables | `@petite-pluie/fetchx-vue`        | `useRequest` / `useMutation` |
-| XHR 上传进度    | `@petite-pluie/fetchx-xhr-upload` | 非流式环境降级               |
+| 插件                  | 包名                                          | 说明                                  |
+| --------------------- | --------------------------------------------- | ------------------------------------- |
+| React hooks           | `@petite-pluie/fetchx-react`                  | `useRequest` / `useMutation`          |
+| Vue composables       | `@petite-pluie/fetchx-vue`                    | `useRequest` / `useMutation`          |
+| 拦截器短路            | `@petite-pluie/fetchx-intercept-shortcircuit` | 拦截器链中提前返回，跳过后续拦截器    |
+| Cache option 原生封装 | `@petite-pluie/fetchx-cache-options`          | 封装 Request.cache 原生选项的便捷接口 |
+| XHR 上传进度          | `@petite-pluie/fetchx-xhr-upload`             | 非流式环境（duplex 不可用）上传进度   |
 
 ---
 

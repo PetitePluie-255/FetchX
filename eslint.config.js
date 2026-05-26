@@ -6,14 +6,14 @@ import prettierConfig from 'eslint-config-prettier';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', '*.d.ts'],
+    ignores: ['dist/**', 'packages/*/dist/**', 'node_modules/**', '*.d.ts'],
   },
 
   js.configs.recommended,
 
   // Test file overrides: relax unsafe-* rules for mock setup
   {
-    files: ['tests/**/*.ts'],
+    files: ['packages/*/tests/**/*.ts'],
     languageOptions: {
       parser: typescriptParser,
       parserOptions: {
@@ -96,7 +96,7 @@ export default [
   },
 
   {
-    files: ['src/**/*.ts'],
+    files: ['packages/*/src/**/*.ts'],
     languageOptions: {
       parser: typescriptParser,
       parserOptions: {
@@ -193,6 +193,14 @@ export default [
       'object-shorthand': 'error',
       'prefer-rest-params': 'error',
       'symbol-description': 'error',
+    },
+  },
+
+  // Logger plugin: console.log is intentional
+  {
+    files: ['packages/plugin-logger/src/**/*.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 

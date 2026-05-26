@@ -80,6 +80,22 @@ importers:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@25.9.1)(@vitest/ui@1.6.1)(lightningcss@1.32.0)(terser@5.47.1)
 
+  packages/fetchx:
+    dependencies:
+      typescript:
+        specifier: '>=4.9.0'
+        version: 5.9.3
+
+  packages/plugin-logger:
+    dependencies:
+      typescript:
+        specifier: '>=4.9.0'
+        version: 5.9.3
+    devDependencies:
+      '@petite-pluie/fetchx':
+        specifier: workspace:*
+        version: link:../fetchx
+
 packages:
   '@ampproject/remapping@2.3.0':
     resolution:

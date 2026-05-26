@@ -1,0 +1,30 @@
+{
+  "git": {
+    "commitMessage": "chore: release logger v${version}",
+    "tagName": "logger-v${version}",
+    "requireCleanWorkingDir": true,
+    "requireUpstream": false,
+    "requireCommits": false,
+    "addUntrackedFiles": false
+  },
+  "github": {
+    "release": false
+  },
+  "npm": {
+    "publish": true,
+    "access": "public"
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": "conventionalcommits",
+      "infile": "CHANGELOG.md",
+      "header": "# Changelog",
+      "releaseCount": 0,
+      "skipUnstable": false
+    }
+  },
+  "hooks": {
+    "after:bump": "pnpm build",
+    "after:release": "echo 'Release logger v${version} completed!'"
+  }
+}

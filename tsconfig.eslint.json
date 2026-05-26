@@ -1,11 +1,14 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
   "include": [
-    "src/**/*.ts",
-    "tests/**/*.ts",
+    "packages/*/src/**/*.ts",
+    "packages/*/tests/**/*.ts",
+    "packages/*/vite.config.ts",
+    "packages/*/vitest.config.ts",
     "eslint.config.js",
-    "vite.config.ts",
-    "vitest.config.ts",
     "commitlint.config.mjs",
     "scripts/**/*.js"
   ]

@@ -7,12 +7,13 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 
 const RULES = [
-  [/^src\/.*\.(ts|js)$/, ['feat', 'fix', 'refactor', 'perf', 'style']],
+  [/^packages\/[^/]+\/src\/.*\.(ts|js)$/, ['feat', 'fix', 'refactor', 'perf', 'style']],
   [/\/test(s)?\//, ['test', 'feat', 'fix']],
   [/\.(test|spec)\.(ts|js)$/, ['test', 'feat', 'fix']],
   [/\.md$/, ['docs']],
   [/^(package\.json|pnpm-lock\.yaml)$/, ['deps', 'build', 'chore']],
-  [/^(tsconfig|vite\.config|vitest\.config|eslint\.config)/, ['build', 'chore']],
+  [/^packages\/[^/]+\/(tsconfig|vite\.config|vitest\.config)\./, ['build', 'chore']],
+  [/^(tsconfig\.base|tsconfig\.eslint|eslint\.config|commitlint\.config|\.lintstagedrc)/, ['build', 'chore']],
 ];
 
 const files = execSync('git diff --cached --name-only', { encoding: 'utf8' })
