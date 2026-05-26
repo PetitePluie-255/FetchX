@@ -1,9 +1,14 @@
 import {
   FetchXError,
+  NetworkError,
+  TimeoutError,
+  CancelError,
+  HTTPError,
   type FetchXConfig,
   type FetchXInstance,
   type FetchXResponse,
   type HttpMethod,
+  type Plugin,
   type ProgressEvent,
   type RequestOptions,
 } from './types';
@@ -35,6 +40,7 @@ import {
   isStreamingNotSupportedError,
   markStreamingSupported,
 } from './progress';
+import { PluginManager } from './plugin';
 
 /**
  * Merge multiple AbortSignals into one.
@@ -79,6 +85,7 @@ export class FetchX {
 
   private cacheStore: CacheStore;
   private concurrency: ConcurrencyManager;
+  private pluginManager: PluginManager;
 
   private _pending = new Map<string, AbortController>();
 
@@ -98,6 +105,7 @@ export class FetchX {
 
     this.cacheStore = new CacheStore(config.cache);
     this.concurrency = new ConcurrencyManager(config.maxConcurrency);
+    this.pluginManager = new PluginManager(this);
   }
 
   /**
@@ -105,6 +113,20 @@ export class FetchX {
    */
   get cache(): CacheStore {
     return this.cacheStore;
+  }
+
+  /**
+   * Register a plugin. Returns an unregister function.
+   */
+  use(plugin: Plugin): () => void {
+    return this.pluginManager.use(plugin);
+  }
+
+  /**
+   * Unregister a plugin by name. Returns true if found.
+   */
+  unuse(name: string): boolean {
+    return this.pluginManager.unuse(name);
   }
 
   /**
@@ -138,13 +160,24 @@ export class FetchX {
     };
 
     // Run request interceptors
-    const processedConfig = await this.interceptors.request.run(requestConfig);
+    let processedConfig = await this.interceptors.request.run(requestConfig);
+
+    // Plugin onRequest hook
+    processedConfig = await this.pluginManager.runOnRequest(
+      processedConfig,
+      {
+        url: processedConfig.url ?? url,
+        method: processedConfig.method ?? method,
+      },
+      processedConfig.plugins
+    );
 
     // Build full URL
     const fullURL = buildURL(
       processedConfig.baseURL ?? '',
       processedConfig.url ?? url,
-      processedConfig.params
+      processedConfig.params,
+      processedConfig.paramsSerializer
     );
 
     // Serialize body
@@ -195,7 +228,6 @@ export class FetchX {
 
       // External signals (shared across retries)
       const userSignal = processedConfig.signal;
-      const cancelSignal = processedConfig.cancelToken?.signal;
       const timeout = processedConfig.timeout;
       const validateStatus = processedConfig.validateStatus ?? isSuccessStatus;
       const onDownloadProgress: ((_e: ProgressEvent) => void) | undefined =
@@ -208,19 +240,11 @@ export class FetchX {
         const retryPromise = executeWithRetry<Response>(
           async () => {
             // Merge external signals
-            const mergedSignal = mergeSignals(
-              userSignal,
-              cancelSignal,
-              dedupeSignal
-            );
+            const mergedSignal = mergeSignals(userSignal, dedupeSignal);
 
             // Check if any external signal is already aborted
             if (mergedSignal?.aborted) {
-              throw new FetchXError(
-                'Request canceled',
-                processedConfig,
-                'ERR_CANCELED'
-              );
+              throw new CancelError(processedConfig);
             }
 
             let requestSignal: AbortSignal | undefined = mergedSignal;
@@ -288,14 +312,22 @@ export class FetchX {
                 onDownloadProgress
               );
 
-              // Validate status
+              // Validate status — on failure, parse body and throw HTTPError
               if (!validateStatus(trackedResponse.status)) {
-                throw new FetchXError(
-                  `Request failed with status ${trackedResponse.status}`,
-                  processedConfig,
-                  'ERR_BAD_RESPONSE',
-                  undefined,
-                  trackedResponse.status
+                const cloned = trackedResponse.clone();
+                const errorBody = await parseResponse(
+                  cloned,
+                  processedConfig.responseType
+                );
+                const errorResponse = buildFetchXResponse(
+                  errorBody,
+                  trackedResponse,
+                  processedConfig
+                );
+                throw new HTTPError(
+                  trackedResponse.status,
+                  errorResponse,
+                  processedConfig
                 );
               }
 
@@ -307,20 +339,12 @@ export class FetchX {
               if (fetchError instanceof Error) {
                 // Timeout
                 if (timedOut || fetchError.name === 'TimeoutError') {
-                  throw new FetchXError(
-                    'Request timeout',
-                    processedConfig,
-                    'ECONNABORTED'
-                  );
+                  throw new TimeoutError(timeout ?? 0, processedConfig);
                 }
 
                 // User-initiated cancel
                 if (fetchError.name === 'AbortError') {
-                  throw new FetchXError(
-                    'Request canceled',
-                    processedConfig,
-                    'ERR_CANCELED'
-                  );
+                  throw new CancelError(processedConfig);
                 }
 
                 // Streaming upload not supported (duplex: 'half' + ReadableStream)
@@ -341,11 +365,7 @@ export class FetchX {
                   fetchError.name === 'TypeError' &&
                   fetchError.message.includes('fetch') === true
                 ) {
-                  throw new FetchXError(
-                    'Network Error',
-                    processedConfig,
-                    'ERR_NETWORK'
-                  );
+                  throw new NetworkError(processedConfig);
                 }
               }
 
@@ -382,6 +402,13 @@ export class FetchX {
           processedConfig
         );
 
+        // Plugin onResponse hook
+        const pluginResponse = await this.pluginManager.runOnResponse(
+          response,
+          { url: fullURL, method: processedConfig.method ?? method },
+          processedConfig.plugins
+        );
+
         // --- Cache set (skip for stream — cannot cache a ReadableStream) ---
         if (cacheKey && processedConfig.responseType !== 'stream') {
           const ttl =
@@ -391,11 +418,21 @@ export class FetchX {
           this.cacheStore.set(cacheKey, data, processedResponse, ttl);
         }
 
-        return response;
+        return pluginResponse;
       } catch (error: unknown) {
         // Cleanup dedupe entry on error
         if (dedupeKey) {
           this._pending.delete(dedupeKey);
+        }
+
+        // Plugin onError hook — let plugins attempt recovery
+        if (error instanceof FetchXError) {
+          const recovered = await this.pluginManager.runOnError(
+            error,
+            { url: fullURL, method: processedConfig.method ?? method },
+            processedConfig.plugins
+          );
+          if (recovered) return recovered as FetchXResponse<T>;
         }
 
         throw error;
@@ -502,7 +539,17 @@ export class FetchX {
     };
 
     // Run request interceptors (token injection etc.)
-    const processedConfig = await this.interceptors.request.run(requestConfig);
+    let processedConfig = await this.interceptors.request.run(requestConfig);
+
+    // Plugin onRequest hook
+    processedConfig = await this.pluginManager.runOnRequest(
+      processedConfig,
+      {
+        url: processedConfig.url ?? url,
+        method: processedConfig.method ?? method,
+      },
+      processedConfig.plugins
+    );
 
     // Build URL
     const fullURL = buildURL(
@@ -529,7 +576,6 @@ export class FetchX {
     // Set up abort controller (connection timeout only)
     const controller = new AbortController();
     const userSignal = processedConfig.signal;
-    const cancelSignal = processedConfig.cancelToken?.signal;
     const timeout = processedConfig.timeout ?? 0;
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -541,7 +587,6 @@ export class FetchX {
     // Chain external signals to our controller
     const onExternalAbort = () => controller.abort();
     userSignal?.addEventListener('abort', onExternalAbort, { once: true });
-    cancelSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
     try {
       const response = await fetch(fullURL, {
@@ -555,33 +600,16 @@ export class FetchX {
       return { response, config: processedConfig };
     } catch (error: unknown) {
       if (error instanceof DOMException && error.name === 'AbortError') {
-        if (
-          controller.signal.aborted &&
-          !userSignal?.aborted &&
-          !cancelSignal?.aborted
-        ) {
-          throw new FetchXError(
-            'Timeout exceeded',
-            processedConfig,
-            'ECONNABORTED'
-          );
+        if (controller.signal.aborted && !userSignal?.aborted) {
+          throw new TimeoutError(timeout, processedConfig);
         }
-        throw new FetchXError(
-          'Request canceled',
-          processedConfig,
-          'ERR_CANCELED'
-        );
+        throw new CancelError(processedConfig);
       }
 
-      throw new FetchXError(
-        error instanceof Error ? error.message : 'Network Error',
-        processedConfig,
-        'ERR_NETWORK'
-      );
+      throw new NetworkError(processedConfig);
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       userSignal?.removeEventListener('abort', onExternalAbort);
-      cancelSignal?.removeEventListener('abort', onExternalAbort);
     }
   }
 
@@ -606,7 +634,12 @@ export class FetchX {
       rest
     );
     const controller = new AbortController();
-    return new Uint8ArrayStream(response, config, controller);
+    const stream = new Uint8ArrayStream(response, config, controller);
+    return this.pluginManager.runOnStream(
+      stream,
+      { url, method },
+      config.plugins
+    );
   }
 
   /**
@@ -640,7 +673,12 @@ export class FetchX {
       rest
     );
     const controller = new AbortController();
-    return new SSEStream(response, config, controller);
+    const sseStream = new SSEStream(response, config, controller);
+    return this.pluginManager.runOnStream(
+      sseStream,
+      { url, method },
+      config.plugins
+    );
   }
 
   /**
@@ -664,14 +702,21 @@ export class FetchX {
       rest
     );
     const controller = new AbortController();
-    return new NDJSONStream<T>(response, config, controller);
+    const ndjsonStream = new NDJSONStream<T>(response, config, controller);
+    return this.pluginManager.runOnStream(
+      ndjsonStream,
+      { url, method },
+      config.plugins
+    );
   }
 }
 
 /**
  * Create a FetchX instance
  */
-export function createFetchX(config?: FetchXConfig): FetchXInstance {
+export function createFetchX<T = unknown>(
+  config?: FetchXConfig
+): FetchXInstance<T> {
   return new FetchX(config);
 }
 

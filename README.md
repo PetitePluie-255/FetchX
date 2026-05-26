@@ -11,7 +11,7 @@
 - **零依赖** — 基于浏览器原生 `fetch`，无第三方运行时依赖
 - **TypeScript 优先** — 完整类型定义，泛型响应
 - **拦截器** — 请求/响应拦截器链，异步执行，支持添加/移除/清空，错误恢复
-- **超时与取消** — 内置超时控制，AbortController / CancelToken 双重 API
+- **超时与取消** — 内置超时控制，AbortController
 - **响应控制** — `validateStatus` 自定义成功判定，`responseType` 强制解析类型
 - **去重请求** — 基于 URL + 参数自动取消重复请求
 - **请求重试** — 指数退避算法，可配置重试次数和条件
@@ -22,7 +22,11 @@
 - **流式请求** — SSE / NDJSON / 原始 Uint8Array 流，`for await...of` 消费
 - **响应流访问** — `responseType: 'stream'` 获取原始 ReadableStream
 - **自动解析** — 根据 Content-Type 自动解析 json/text/blob/form-data
-- **错误分类** — `FetchXError` 明确区分网络、超时、取消、HTTP、不支持
+- **错误分类** — `FetchXError` 基类 + `NetworkError` / `TimeoutError` / `CancelError` / `HTTPError` 子类，类型守卫鉴别
+- **插件架构** — `api.use(plugin)` 插件系统，request/response/error/stream 生命周期钩子，优先级排序
+- **命名拦截器** — 拦截器支持按名称注册和移除（`use(name, fn)` / `remove(name)`）
+- **嵌套参数** — 查询参数支持嵌套对象（`filter[status]=active`）和自定义 `paramsSerializer`
+- **配置脱敏** — `sanitizeConfig` 开关，自动剥离敏感请求头
 
 ## 安装
 
@@ -75,7 +79,7 @@ await api.head('/users');
 
 ## 配置
 
-```typescript
+````typescript
 import { createFetchX } from '@petite-pluie/fetchx';
 
 const api = createFetchX({
@@ -93,8 +97,8 @@ const api = createFetchX({
   cache: { ttl: 60000, maxSize: 100 }, // 请求缓存配置
   retry: { retries: 3, delay: 1000 }, // 请求重试配置
   maxConcurrency: 5, // 最大并发请求数（0 = 不限）
+  sanitizeConfig: true, // 脱敏 config.headers（authorization 等）
 });
-```
 
 ### `validateStatus` — 自定义成功判定
 
@@ -108,7 +112,7 @@ const api = createFetchX({ validateStatus: status => status < 500 });
 await api.get('/data', {
   validateStatus: status => status === 200 || status === 304,
 });
-```
+````
 
 ### `responseType` — 强制响应解析
 
@@ -135,19 +139,6 @@ const data = await api.request({
   body: { name: 'John' },
   params: { sync: true },
 });
-```
-
-### `CancelToken` — axios 兼容取消 API
-
-```typescript
-import { CancelToken } from '@petite-pluie/fetchx';
-
-const source = CancelToken.source();
-
-api.get('/slow', { cancelToken: source.token });
-
-// 取消请求
-source.cancel('操作被用户中断');
 ```
 
 ### 自动去重 (`dedupe`)
@@ -361,11 +352,18 @@ api.interceptors.response.use(response => {
 ### 拦截器管理
 
 ```typescript
-// 添加拦截器并获取 ID
+// 添加匿名拦截器并获取 ID
 const id = api.interceptors.request.use(config => config);
 
-// 移除指定拦截器
+// 按 ID 移除
 api.interceptors.request.eject(id);
+
+// 添加命名拦截器，返回卸载函数
+const unsub = api.interceptors.request.use('auth', config => config);
+unsub(); // 按返回的卸载函数移除
+
+// 按名称移除
+api.interceptors.request.remove('auth');
 
 // 清空所有拦截器
 api.interceptors.request.clear();
@@ -482,6 +480,88 @@ const result = await api.get<User>('/users/1');
 console.log(result.status, result.headers, result.config);
 ```
 
+## 插件系统
+
+FetchX v2.0 内置插件系统，通过 `api.use(plugin)` 注册。插件可以介入请求的完整生命周期。
+
+### 插件钩子
+
+| 钩子         | 触发时机                 | 用途             |
+| ------------ | ------------------------ | ---------------- |
+| `onInit`     | 注册插件时               | 初始化、注入能力 |
+| `onRequest`  | 请求发出前（拦截器之后） | 修改配置、添加头 |
+| `onResponse` | 收到响应后               | 响应变换、埋点   |
+| `onError`    | 请求出错时               | 错误上报、恢复   |
+| `onStream`   | 流式请求建立时           | 流式数据转换     |
+
+### 基本用法
+
+```typescript
+import { createFetchX } from '@petite-pluie/fetchx';
+import type { Plugin } from '@petite-pluie/fetchx';
+
+const loggingPlugin: Plugin = {
+  name: 'logger',
+  onRequest: config => {
+    console.log(`[${config.method}] ${config.url}`);
+    return config;
+  },
+  onResponse: response => {
+    console.log(`[${response.status}] ${response.config?.url}`);
+    return response;
+  },
+};
+
+const api = createFetchX();
+const unsub = api.use(loggingPlugin); // 注册
+api.unuse('logger'); // 按名称移除
+```
+
+### 错误恢复
+
+`onError` 返回 `FetchXResponse` 即可从错误中恢复：
+
+```typescript
+const recoveryPlugin: Plugin = {
+  name: 'recovery',
+  onError: (error, { url }) => {
+    if (error.code === 'ERR_NETWORK' && url.endsWith('/retry')) {
+      // 返回一个降级响应，请求不再抛异常
+      return {
+        data: { cached: true },
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers(),
+        config: {},
+      };
+    }
+    return null; // 返回 null/undefined 继续抛出
+  },
+};
+```
+
+### 请求级插件
+
+```typescript
+await api.get('/users', {
+  plugins: [{ name: 'track', onRequest: config => config }],
+});
+```
+
+### `createFetchX<T>()` 泛型穿透
+
+```typescript
+interface AppData {
+  user: { id: number; name: string };
+}
+
+// 实例所有 get/post 默认 T = AppData
+const api = createFetchX<AppData>();
+
+const { data } = await api.get('/user'); // data: AppData
+const { data } = await api.get<AppData[]>('/users'); // 仍可覆盖
+```
+
 ### 导出的类型
 
 ```typescript
@@ -499,12 +579,21 @@ import type {
   CacheManager,
   ProgressEvent,
   SSEEvent,
+  Plugin,
+  PluginContext,
 } from '@petite-pluie/fetchx';
 import {
   FetchXError,
+  NetworkError,
+  TimeoutError,
+  CancelError,
+  HTTPError,
   isCancel,
+  isNetworkError,
+  isTimeoutError,
+  isCancelError,
+  isHTTPError,
   createFetchX,
-  CancelToken,
   FetchXStream,
   debounceRequest,
   throttleRequest,
@@ -519,24 +608,28 @@ import {
 创建 FetchX 实例。
 
 ```typescript
-function createFetchX(config?: FetchXConfig): FetchXInstance;
+function createFetchX<T = unknown>(config?: FetchXConfig): FetchXInstance<T>;
 ```
 
-### `FetchXInstance`
+### `FetchXInstance<T>`
 
-| 方法 / 属性 | 签名                                                        |
-| ----------- | ----------------------------------------------------------- |
-| `get`       | `<T>(url, options?) => Promise<FetchXResponse<T>>`          |
-| `post`      | `<T>(url, body?, options?) => Promise<FetchXResponse<T>>`   |
-| `put`       | `<T>(url, body?, options?) => Promise<FetchXResponse<T>>`   |
-| `delete`    | `<T>(url, options?) => Promise<FetchXResponse<T>>`          |
-| `patch`     | `<T>(url, body?, options?) => Promise<FetchXResponse<T>>`   |
-| `head`      | `<T>(url, options?) => Promise<FetchXResponse<T>>`          |
-| `request`   | `<T>(config: RequestOptions) => Promise<FetchXResponse<T>>` |
-| `stream`    | `(url, options?) => Promise<FetchXStream<Uint8Array>>`      |
-| `sse`       | `(url, options?) => Promise<FetchXStream<SSEEvent>>`        |
-| `ndjson`    | `<T>(url, options?) => Promise<FetchXStream<T>>`            |
-| `cache`     | `CacheManager` — 缓存管理对象（clear/delete/has/get/size）  |
+`T` 为默认响应数据类型，可通过 `createFetchX<AppData>()` 设置。每个方法仍可单独覆盖。
+
+| 方法 / 属性 | 签名                                                            |
+| ----------- | --------------------------------------------------------------- |
+| `get`       | `<R = T>(url, options?) => Promise<FetchXResponse<R>>`          |
+| `post`      | `<R = T>(url, body?, options?) => Promise<FetchXResponse<R>>`   |
+| `put`       | `<R = T>(url, body?, options?) => Promise<FetchXResponse<R>>`   |
+| `delete`    | `<R = T>(url, options?) => Promise<FetchXResponse<R>>`          |
+| `patch`     | `<R = T>(url, body?, options?) => Promise<FetchXResponse<R>>`   |
+| `head`      | `<R = T>(url, options?) => Promise<FetchXResponse<R>>`          |
+| `request`   | `<R = T>(config: RequestOptions) => Promise<FetchXResponse<R>>` |
+| `stream`    | `(url, options?) => Promise<FetchXStream<Uint8Array>>`          |
+| `sse`       | `(url, options?) => Promise<FetchXStream<SSEEvent>>`            |
+| `ndjson`    | `<R = T>(url, options?) => Promise<FetchXStream<R>>`            |
+| `cache`     | `CacheManager` — 缓存管理对象（clear/delete/has/get/size）      |
+| `use`       | `(plugin: Plugin) => () => void` — 注册插件                     |
+| `unuse`     | `(name: string) => boolean` — 卸载插件                          |
 
 #### `RequestOptions`
 
@@ -549,7 +642,6 @@ function createFetchX(config?: FetchXConfig): FetchXInstance;
 | `headers`            | `Record<string, string>`                                                | 请求头（合并到默认头）     |
 | `timeout`            | `number`                                                                | 本次请求超时时间           |
 | `signal`             | `AbortSignal`                                                           | 取消信号                   |
-| `cancelToken`        | `CancelToken`                                                           | axios 兼容取消令牌         |
 | `baseURL`            | `string`                                                                | 覆盖实例的 baseURL         |
 | `credentials`        | `RequestCredentials`                                                    | 凭证模式                   |
 | `validateStatus`     | `(status: number) => boolean`                                           | 自定义成功状态码判定       |
@@ -558,22 +650,43 @@ function createFetchX(config?: FetchXConfig): FetchXInstance;
 | `cache`              | `CacheConfig \| false`                                                  | 请求缓存配置               |
 | `retry`              | `RetryConfig \| false`                                                  | 请求重试配置               |
 | `maxConcurrency`     | `number`                                                                | 最大并发请求数             |
+| `sanitizeConfig`     | `boolean`                                                               | 脱敏 config.headers        |
+| `paramsSerializer`   | `(params: Record<string, unknown>) => string`                           | 自定义参数序列化函数       |
+| `plugins`            | `Plugin[]`                                                              | 请求级插件                 |
 | `onDownloadProgress` | `(e: ProgressEvent) => void`                                            | 下载进度回调               |
 | `onUploadProgress`   | `(e: ProgressEvent) => void`                                            | 上传进度回调               |
+| `onUploadProgress`   | `(e: ProgressEvent) => void`                                            | 上传进度回调               |
 
-### `FetchXError`
+### `FetchXError` 错误类型体系
 
-| 属性           | 类型              | 说明                                                                                               |
-| -------------- | ----------------- | -------------------------------------------------------------------------------------------------- |
-| `message`      | `string`          | 错误描述                                                                                           |
-| `code`         | `string?`         | 错误码：`ERR_NETWORK` / `ECONNABORTED` / `ERR_CANCELED` / `ERR_BAD_RESPONSE` / `ERR_NOT_SUPPORTED` |
-| `status`       | `number?`         | HTTP 状态码（仅在 `ERR_BAD_RESPONSE` 时）                                                          |
-| `config`       | `RequestOptions?` | 引发错误的请求配置                                                                                 |
-| `isAxiosError` | `boolean`         | 始终为 `true`                                                                                      |
+```typescript
+FetchXError          // 基类
+├── NetworkError     // ERR_NETWORK — 网络连接失败
+├── TimeoutError     // ECONNABORTED — 请求超时
+├── CancelError      // ERR_CANCELED — 用户取消
+└── HTTPError<T>     // ERR_BAD_RESPONSE — HTTP 错误，携带 response
+```
+
+`HTTPError<T>` 额外包含 `response: FetchXResponse<T>` 字段，内含服务端返回的错误 body。
+
+类型守卫：
+
+```typescript
+import {
+  isNetworkError,
+  isTimeoutError,
+  isCancelError,
+  isHTTPError,
+} from '@petite-pluie/fetchx';
+
+if (isHTTPError(error)) {
+  console.log(error.response.status, error.response.data);
+}
+```
 
 ### `isCancel(value)`
 
-检测是否为取消/超时错误，兼容 FetchX、原生 AbortError、Axios CanceledError。
+检测是否为取消错误，兼容 `CancelError`、原生 `AbortError`。
 
 ```typescript
 function isCancel(value: unknown): boolean;

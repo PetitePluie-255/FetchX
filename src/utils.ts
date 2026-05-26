@@ -1,5 +1,9 @@
 import {
   FetchXError,
+  NetworkError,
+  TimeoutError,
+  CancelError,
+  HTTPError,
   type FetchXConfig,
   type FetchXResponse,
   type RequestOptions,
@@ -7,22 +11,35 @@ import {
 } from './types';
 
 /**
- * Serialize query parameters to URL search string
+ * Serialize a single param value into key=value pairs for nested objects.
+ * Uses bracket notation: { filter: { status: 'active' } } → filter[status]=active
+ */
+function encodeParam(key: string, value: unknown): Array<[string, string]> {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(item => encodeParam(`${key}[]`, item));
+  }
+  if (typeof value === 'object' && !(value instanceof Date)) {
+    return Object.entries(value as Record<string, unknown>).flatMap(
+      ([subKey, subValue]) => encodeParam(`${key}[${subKey}]`, subValue)
+    );
+  }
+  return [[key, String(value)]];
+}
+
+/**
+ * Serialize query parameters to URL search string.
+ * Supports nested objects via bracket notation.
  */
 export function serializeParams(params: Record<string, unknown>): string {
   const searchParams = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
-    if (value === null || value === undefined) {
-      return;
-    }
-    if (Array.isArray(value)) {
-      value.forEach(item => {
-        searchParams.append(key, String(item));
-      });
-    } else {
-      searchParams.append(key, String(value));
-    }
+    encodeParam(key, value).forEach(([k, v]) => {
+      searchParams.append(k, v);
+    });
   });
 
   return searchParams.toString();
@@ -34,7 +51,8 @@ export function serializeParams(params: Record<string, unknown>): string {
 export function buildURL(
   baseURL: string,
   url: string,
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  paramsSerializer?: (_params: Record<string, unknown>) => string
 ): string {
   let fullURL = url;
 
@@ -43,7 +61,8 @@ export function buildURL(
   }
 
   if (params && Object.keys(params).length > 0) {
-    const serializedParams = serializeParams(params);
+    const serializer = paramsSerializer ?? serializeParams;
+    const serializedParams = serializer(params);
     if (serializedParams) {
       const separator = fullURL.includes('?') ? '&' : '?';
       fullURL += separator + serializedParams;
@@ -113,6 +132,8 @@ export function mergeConfig(
     cache: requestOptions.cache ?? instanceConfig.cache,
     maxConcurrency:
       requestOptions.maxConcurrency ?? instanceConfig.maxConcurrency,
+    sanitizeConfig:
+      requestOptions.sanitizeConfig ?? instanceConfig.sanitizeConfig,
     ...requestOptions,
     headers: {
       ...instanceConfig.headers,
@@ -180,6 +201,27 @@ export async function parseResponse(
 /**
  * Build a standardized FetchX response object
  */
+/** Headers to strip from config when sanitizeConfig is enabled */
+const SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+]);
+
+function sanitizeHeaders(
+  headers: Record<string, string> | undefined
+): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (!SENSITIVE_HEADERS.has(key.toLowerCase())) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export function buildFetchXResponse<T = unknown>(
   data: T,
   response: Response,
@@ -190,29 +232,41 @@ export function buildFetchXResponse<T = unknown>(
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
-    config,
+    config: config.sanitizeConfig
+      ? { ...config, headers: sanitizeHeaders(config.headers) }
+      : config,
   };
 }
 
 /**
- * Detect if an error is a cancellation/abort error
- * Compatible with FetchX errors, native AbortError, Axios CanceledError
+ * Error type guards
+ */
+export function isNetworkError(value: unknown): value is NetworkError {
+  return value instanceof NetworkError;
+}
+
+export function isTimeoutError(value: unknown): value is TimeoutError {
+  return value instanceof TimeoutError;
+}
+
+export function isCancelError(value: unknown): value is CancelError {
+  return value instanceof CancelError;
+}
+
+export function isHTTPError<T = unknown>(
+  value: unknown
+): value is HTTPError<T> {
+  return value instanceof HTTPError;
+}
+
+/**
+ * Detect if an error is a cancellation/abort error.
+ * Covers CancelError, AbortError, and legacy ERR_CANCELED code.
  */
 export function isCancel(value: unknown): boolean {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const error = value as FetchXError;
-
-  return !!(
-    error.code === 'ERR_CANCELED' ||
-    error.code === 'ECONNABORTED' ||
-    error.name === 'AbortError' ||
-    error.name === 'CanceledError' ||
-    error.__CANCEL__ === true ||
-    (typeof error.message === 'string' &&
-      (error.message.toLowerCase().includes('cancel') ||
-        error.message.toLowerCase().includes('abort')))
+  return (
+    isCancelError(value) ||
+    (value instanceof Error && value.name === 'AbortError') ||
+    (value instanceof Error && (value as FetchXError).code === 'ERR_CANCELED')
   );
 }

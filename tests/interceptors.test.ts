@@ -177,12 +177,13 @@ describe('Interceptors', () => {
 
   describe('response error interceptors', () => {
     it('should call rejected handler on non-2xx response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-        headers: new Headers(),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
       const onRejected = vi.fn((_error: unknown) => {
@@ -204,12 +205,13 @@ describe('Interceptors', () => {
     });
 
     it('should allow rejected handler to recover by returning a Response', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        statusText: 'Unauthorized',
-        headers: new Headers(),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 401,
+          statusText: 'Unauthorized',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
 
@@ -228,12 +230,13 @@ describe('Interceptors', () => {
     });
 
     it('should re-throw error from rejected handler', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-        headers: new Headers(),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 500,
+          statusText: 'Internal Server Error',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
       const customError = new Error('Boom');
@@ -249,13 +252,13 @@ describe('Interceptors', () => {
     });
 
     it('should support mixed fulfilled/rejected chain with recovery', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 403,
-        statusText: 'Forbidden',
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: () => Promise.resolve({ error: 'forbidden' }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'forbidden' }), {
+          status: 403,
+          statusText: 'Forbidden',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
       const order: string[] = [];
@@ -288,12 +291,13 @@ describe('Interceptors', () => {
     });
 
     it('should propagate error when no rejected handler is registered', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 502,
-        statusText: 'Bad Gateway',
-        headers: new Headers(),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 502,
+          statusText: 'Bad Gateway',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
 
@@ -373,6 +377,57 @@ describe('Interceptors', () => {
       expect(api.interceptors.request.length).toBe(1);
 
       api.interceptors.request.use(vi.fn(config => config));
+      expect(api.interceptors.request.length).toBe(2);
+    });
+
+    it('should support named interceptors via use(name, fn)', async () => {
+      const responseBody = new Response(JSON.stringify({}), {
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+      mockFetch.mockResolvedValueOnce(responseBody);
+      mockFetch.mockResolvedValueOnce(responseBody.clone());
+
+      const api = createFetchX();
+      const interceptor = vi.fn(config => config);
+
+      const unsub = api.interceptors.request.use('auth', interceptor);
+      await api.get('/test');
+      expect(interceptor).toHaveBeenCalledTimes(1);
+
+      unsub();
+      await api.get('/test2');
+      // Should not be called again after unsub
+      expect(interceptor).toHaveBeenCalledTimes(1);
+    });
+
+    it('should remove named interceptors via remove(name)', () => {
+      const api = createFetchX();
+      const interceptor = vi.fn(config => config);
+
+      api.interceptors.request.use('logger', interceptor);
+      expect(api.interceptors.request.length).toBe(1);
+
+      const removed = api.interceptors.request.remove('logger');
+      expect(removed).toBe(true);
+      expect(api.interceptors.request.length).toBe(0);
+
+      // Removing again returns false
+      expect(api.interceptors.request.remove('logger')).toBe(false);
+    });
+
+    it('should support both named and anonymous interceptors', () => {
+      const api = createFetchX();
+
+      const namedId = api.interceptors.request.use(
+        'named',
+        vi.fn(config => config)
+      );
+      const anonId = api.interceptors.request.use(vi.fn(config => config));
+
+      expect(typeof namedId).toBe('function');
+      expect(typeof anonId).toBe('number');
       expect(api.interceptors.request.length).toBe(2);
     });
   });

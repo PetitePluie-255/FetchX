@@ -209,41 +209,48 @@ P0 — Bug 修复是发布的前置条件。详见 [BUGS.md](./BUGS.md)。
 
 ---
 
-## v2.0 — 插件架构 🔮 计划中
+## v2.0 — 核心重构 + 插件架构 ✅ 已完成
 
 ### 目标
 
-提供 `api.use(plugin)` 插件化扩展机制，让 React/Vue 集成、XHR 降级等能力脱离核心库，作为独立 npm 包发布。保持 FetchX 核心零依赖、聚焦 HTTP。
+核心重构（错误系统 + 架构精简）+ `api.use(plugin)` 插件化扩展机制。保持 FetchX 核心零依赖、聚焦 HTTP。
 
-### 插件钩子
+### 核心重构
 
-插件通过钩子（hooks）介入请求生命周期：
+- **错误类型分层** — `FetchXError` 基类 + `NetworkError` / `TimeoutError` / `CancelError` / `HTTPError<T>` 子类
+- **T2 修复** — `HTTPError.response` 现在包含解析后的服务端错误 body（使用 `response.clone()`）
+- **类型守卫** — `isNetworkError()` / `isTimeoutError()` / `isCancelError()` / `isHTTPError()`
+- **`isCancel` 简化** — 移除 axios 启发式匹配（CanceledError、`__CANCEL__`、消息关键词）
+- **CancelToken 移除** — 用户改用原生 `AbortController`
+- **命名拦截器** — `interceptors.use(name, fn)` 返回卸载函数，`remove(name)` 按名删除
+- **配置脱敏** — `sanitizeConfig` 开关，自动剥离敏感请求头（authorization, cookie 等）
+- **参数序列化增强** — 支持嵌套对象（`filter[status]=active`），自定义 `paramsSerializer`
+- **泛型穿透** — `createFetchX<AppData>()` 设置实例级别默认响应类型
 
-| 钩子         | 触发时机                 | 用途                        |
-| ------------ | ------------------------ | --------------------------- |
-| `onInit`     | 实例创建时               | 注入能力（如 adapter 替换） |
-| `onRequest`  | 请求发出前（拦截器之后） | 修改配置、添加头            |
-| `onResponse` | 收到响应后（解析之前）   | 响应变换、埋点              |
-| `onError`    | 请求出错时               | 错误上报、重试              |
-| `onStream`   | 流式请求建立时           | 流式数据钩子                |
+### 插件架构
+
+| 钩子         | 触发时机                 | 用途             |
+| ------------ | ------------------------ | ---------------- |
+| `onInit`     | 注册插件时               | 初始化、注入能力 |
+| `onRequest`  | 请求发出前（拦截器之后） | 修改配置、添加头 |
+| `onResponse` | 收到响应后（解析之前）   | 响应变换、埋点   |
+| `onError`    | 请求出错时               | 错误上报、恢复   |
+| `onStream`   | 流式请求建立时           | 流式数据转换     |
 
 ### 计划功能
 
 - **`api.use(plugin)`** — 注册插件，返回卸载函数
-- **插件优先级** — 控制执行顺序
+- **插件优先级** — 按 priority 排序执行（低值优先）
 - **请求级插件** — `api.get(url, { plugins: [...] })`
+- **错误恢复** — `onError` 返回 `FetchXResponse` 即可恢复
 
-### 官方插件生态
+### 官方插件生态（规划中）
 
 | 插件            | 包名                              | 说明                         |
 | --------------- | --------------------------------- | ---------------------------- |
 | React hooks     | `@petite-pluie/fetchx-react`      | `useRequest` / `useMutation` |
 | Vue composables | `@petite-pluie/fetchx-vue`        | `useRequest` / `useMutation` |
 | XHR 上传进度    | `@petite-pluie/fetchx-xhr-upload` | 非流式环境降级               |
-
-### 优先级
-
-P1 — 插件架构是生态扩展的基石，是框架集成和 XHR 降级的前置依赖。
 
 ---
 
@@ -290,14 +297,14 @@ P2 — 大规模项目需求，按需推进。
 
 ## 版本总览
 
-| 版本 | 主题              | 状态      |
-| ---- | ----------------- | --------- |
-| v1.0 | 基础 HTTP 客户端  | ✅ 已完成 |
-| v1.1 | 拦截器增强        | ✅ 已完成 |
-| v1.2 | 请求/响应控制增强 | ✅ 已完成 |
-| v1.3 | 高级请求特性      | ✅ 已完成 |
-| v1.4 | 通用流式封装      | ✅ 已完成 |
-| v1.5 | 核心缺陷修复      | ✅ 已完成 |
-| v2.0 | 插件架构          | 🔮 计划中 |
-| v2.1 | 高级数据管理      | 🔮 计划中 |
-| v3.0 | 企业级特性        | 🔮 计划中 |
+| 版本 | 主题                | 状态      |
+| ---- | ------------------- | --------- |
+| v1.0 | 基础 HTTP 客户端    | ✅ 已完成 |
+| v1.1 | 拦截器增强          | ✅ 已完成 |
+| v1.2 | 请求/响应控制增强   | ✅ 已完成 |
+| v1.3 | 高级请求特性        | ✅ 已完成 |
+| v1.4 | 通用流式封装        | ✅ 已完成 |
+| v1.5 | 核心缺陷修复        | ✅ 已完成 |
+| v2.0 | 核心重构 + 插件架构 | ✅ 已完成 |
+| v2.1 | 高级数据管理        | 🔮 计划中 |
+| v3.0 | 企业级特性          | 🔮 计划中 |

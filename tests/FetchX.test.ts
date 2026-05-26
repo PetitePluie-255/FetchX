@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFetchX } from '../src/FetchX';
-import { FetchXError, CancelToken } from '../src/types';
+import { FetchXError, CancelError } from '../src/types';
 import { FetchXStream } from '../src/stream';
 
 // Helper: create a ReadableStream<Uint8Array> for mock fetch responses
@@ -337,12 +337,13 @@ describe('FetchX', () => {
 
   describe('error handling', () => {
     it('should throw FetchXError on non-2xx status', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-        headers: new Headers(),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
       try {
@@ -382,6 +383,73 @@ describe('FetchX', () => {
 
       const api = createFetchX();
       await expect(api.get('/test')).rejects.toThrow('Something else');
+    });
+  });
+
+  describe('config sanitization', () => {
+    it('should strip sensitive headers from config when sanitizeConfig is enabled', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
+
+      const api = createFetchX({
+        sanitizeConfig: true,
+        headers: { Authorization: 'Bearer secret', 'X-Custom': 'visible' },
+      });
+
+      const result = await api.get('/test');
+      expect(
+        (result.config.headers as Record<string, string>).Authorization
+      ).toBeUndefined();
+      expect(
+        (result.config.headers as Record<string, string>)['X-Custom']
+      ).toBe('visible');
+    });
+
+    it('should keep sensitive headers when sanitizeConfig is off', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({}), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
+
+      const api = createFetchX({
+        headers: { Authorization: 'Bearer secret' },
+      });
+
+      const result = await api.get('/test');
+      expect(
+        (result.config.headers as Record<string, string>).Authorization
+      ).toBe('Bearer secret');
+    });
+  });
+
+  describe('paramsSerializer', () => {
+    it('should use custom paramsSerializer when provided', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve([]),
+      });
+
+      const api = createFetchX();
+      await api.get('/users', {
+        params: { name: 'test' },
+        paramsSerializer: () => 'custom=param',
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/users?custom=param',
+        expect.any(Object)
+      );
     });
   });
 
@@ -435,12 +503,13 @@ describe('FetchX', () => {
     });
 
     it('should still reject with default validator', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-        headers: new Headers({}),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(null, {
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX();
       await expect(api.get('/not-found')).rejects.toThrow(
@@ -610,42 +679,6 @@ describe('FetchX', () => {
     });
   });
 
-  describe('CancelToken', () => {
-    it('should cancel request using CancelToken.source()', async () => {
-      mockFetch.mockImplementationOnce(
-        (_url: string, _options?: RequestInit) =>
-          new Promise((_resolve, reject) => {
-            if (_options?.signal) {
-              _options.signal.addEventListener('abort', () => {
-                const err = new Error('The operation was aborted');
-                err.name = 'AbortError';
-                reject(err);
-              });
-            }
-          })
-      );
-
-      const api = createFetchX();
-      const { token, cancel } = CancelToken.source();
-
-      setTimeout(() => cancel(), 10);
-      await expect(api.get('/test', { cancelToken: token })).rejects.toThrow(
-        'Request canceled'
-      );
-    });
-
-    it('should immediately reject when token is already canceled', async () => {
-      const { token, cancel } = CancelToken.source();
-      cancel();
-
-      const api = createFetchX();
-      await expect(api.get('/test', { cancelToken: token })).rejects.toThrow(
-        'Request canceled'
-      );
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-  });
-
   describe('dedupe', () => {
     it('should cancel previous identical request when dedupe is enabled', async () => {
       let firstAborted = false;
@@ -663,43 +696,47 @@ describe('FetchX', () => {
           })
       );
 
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: () => Promise.resolve({ data: 'second' }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'second' }), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX({ dedupe: true });
 
       const first = api.get('/dedupe-test');
       // Small delay to let first request start before second comes in
       await new Promise(resolve => setTimeout(resolve, 5));
+      // Catch immediately to avoid unhandled rejection
+      const firstError = first.then(null, e => e);
       const second = api.get('/dedupe-test');
 
       const secondResult = await second;
       expect(secondResult.data).toEqual({ data: 'second' });
 
-      await expect(first).rejects.toThrow('Request canceled');
+      const err = await firstError;
+      expect(err).toBeInstanceOf(CancelError);
+      expect(err.message).toBe('Request canceled');
       expect(firstAborted).toBe(true);
     });
 
     it('should not cancel requests to different URLs', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: () => Promise.resolve({ data: 'a' }),
-      });
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        headers: new Headers({ 'content-type': 'application/json' }),
-        json: () => Promise.resolve({ data: 'b' }),
-      });
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'a' }), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 'b' }), {
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
 
       const api = createFetchX({ dedupe: true });
 

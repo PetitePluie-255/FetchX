@@ -74,6 +74,9 @@ export interface FetchXConfig {
   cache?: CacheConfig | false;
   /** Max concurrent in-flight requests. 0 = unlimited */
   maxConcurrency?: number;
+  /** Strip sensitive headers (authorization, cookie, set-cookie, x-api-key)
+   * from response.config.headers. Default: false */
+  sanitizeConfig?: boolean;
 }
 
 /**
@@ -82,39 +85,15 @@ export interface FetchXConfig {
 export interface RequestOptions extends Partial<FetchXConfig> {
   url?: string;
   params?: Record<string, unknown>;
+  paramsSerializer?: (_params: Record<string, unknown>) => string;
   body?: unknown;
   method?: string;
   signal?: AbortSignal;
-  cancelToken?: CancelToken;
   onDownloadProgress?: (_event: ProgressEvent) => void;
   onUploadProgress?: (_event: ProgressEvent) => void;
+  plugins?: Plugin[];
 }
 
-/**
- * Cancel token for request cancellation (axios-compatible API)
- */
-export class CancelToken {
-  private controller = new AbortController();
-
-  get signal(): AbortSignal {
-    return this.controller.signal;
-  }
-
-  static source(): {
-    token: CancelToken;
-    cancel: (_reason?: string) => void;
-  } {
-    const token = new CancelToken();
-    const cancel = (reason?: string) => {
-      token.controller.abort(reason);
-    };
-    return { token, cancel };
-  }
-}
-
-/**
- * Standardized response object
- */
 export interface FetchXResponse<T = unknown> {
   data: T;
   status: number;
@@ -133,7 +112,6 @@ export class FetchXError extends Error {
   readonly request?: unknown;
   readonly response?: FetchXResponse;
   readonly isAxiosError = true;
-  readonly __CANCEL__?: boolean;
 
   constructor(
     message: string,
@@ -148,6 +126,62 @@ export class FetchXError extends Error {
     this.code = code;
     this.request = request;
     this.status = status;
+  }
+}
+
+/**
+ * Network error — DNS failure, CORS, offline
+ */
+export class NetworkError extends FetchXError {
+  constructor(config?: RequestOptions) {
+    super('Network Error', config, 'ERR_NETWORK');
+    this.name = 'NetworkError';
+  }
+}
+
+/**
+ * Request timeout error
+ */
+export class TimeoutError extends FetchXError {
+  readonly timeout: number;
+
+  constructor(timeout: number, config?: RequestOptions) {
+    super('Request timeout', config, 'ECONNABORTED');
+    this.name = 'TimeoutError';
+    this.timeout = timeout;
+  }
+}
+
+/**
+ * Request canceled by user (AbortController)
+ */
+export class CancelError extends FetchXError {
+  constructor(config?: RequestOptions) {
+    super('Request canceled', config, 'ERR_CANCELED');
+    this.name = 'CancelError';
+  }
+}
+
+/**
+ * HTTP error with response body (4xx/5xx)
+ */
+export class HTTPError<T = unknown> extends FetchXError {
+  readonly response: FetchXResponse<T>;
+
+  constructor(
+    status: number,
+    response: FetchXResponse<T>,
+    config?: RequestOptions
+  ) {
+    super(
+      `Request failed with status ${status}`,
+      config,
+      'ERR_BAD_RESPONSE',
+      undefined,
+      status
+    );
+    this.name = 'HTTPError';
+    this.response = response;
   }
 }
 
@@ -178,40 +212,43 @@ export interface CacheManager {
 
 /**
  * FetchX instance public API
+ *
+ * T is the default response data type for all requests.
+ * Each method still accepts an explicit type override via its own type parameter.
  */
-export interface FetchXInstance {
+export interface FetchXInstance<T = unknown> {
   interceptors: {
     request: RequestInterceptorManager;
     response: ResponseInterceptorManager;
   };
-  request: <T = unknown>(_config: RequestOptions) => Promise<FetchXResponse<T>>;
-  get: <T = unknown>(
+  request: <R = T>(_config: RequestOptions) => Promise<FetchXResponse<R>>;
+  get: <R = T>(
     _url: string,
     _options?: RequestOptions
-  ) => Promise<FetchXResponse<T>>;
-  post: <T = unknown>(
-    _url: string,
-    _body?: unknown,
-    _options?: RequestOptions
-  ) => Promise<FetchXResponse<T>>;
-  put: <T = unknown>(
+  ) => Promise<FetchXResponse<R>>;
+  post: <R = T>(
     _url: string,
     _body?: unknown,
     _options?: RequestOptions
-  ) => Promise<FetchXResponse<T>>;
-  delete: <T = unknown>(
-    _url: string,
-    _options?: RequestOptions
-  ) => Promise<FetchXResponse<T>>;
-  patch: <T = unknown>(
+  ) => Promise<FetchXResponse<R>>;
+  put: <R = T>(
     _url: string,
     _body?: unknown,
     _options?: RequestOptions
-  ) => Promise<FetchXResponse<T>>;
-  head: <T = unknown>(
+  ) => Promise<FetchXResponse<R>>;
+  delete: <R = T>(
     _url: string,
     _options?: RequestOptions
-  ) => Promise<FetchXResponse<T>>;
+  ) => Promise<FetchXResponse<R>>;
+  patch: <R = T>(
+    _url: string,
+    _body?: unknown,
+    _options?: RequestOptions
+  ) => Promise<FetchXResponse<R>>;
+  head: <R = T>(
+    _url: string,
+    _options?: RequestOptions
+  ) => Promise<FetchXResponse<R>>;
   stream: (
     _url: string,
     _options?: RequestOptions
@@ -220,9 +257,60 @@ export interface FetchXInstance {
     _url: string,
     _options?: RequestOptions
   ) => Promise<FetchXStream<SSEEvent>>;
-  ndjson: <T = unknown>(
+  ndjson: <R = T>(
     _url: string,
     _options?: RequestOptions
-  ) => Promise<FetchXStream<T>>;
+  ) => Promise<FetchXStream<R>>;
   cache: CacheManager;
+  use: (_plugin: Plugin) => () => void;
+  unuse: (_name: string) => boolean;
+}
+
+/**
+ * Plugin context passed to lifecycle hooks
+ */
+export interface PluginContext {
+  /** Request URL (after baseURL resolution) */
+  url: string;
+  /** HTTP method */
+  method: string;
+}
+
+/**
+ * A FetchX plugin that hooks into request/response lifecycle.
+ *
+ * Each hook receives a PluginContext with request metadata.
+ * Hooks run in priority order (lower priority value = runs first).
+ */
+export interface Plugin {
+  /** Unique plugin name */
+  name: string;
+  /** Execution priority. Lower runs first. Default: 0 */
+  priority?: number;
+  /** Called when the plugin is registered via api.use() */
+  onInit?: (_instance: FetchXInstance) => void | Promise<void>;
+  /** Called after request interceptors, before fetch. Can modify RequestOptions. */
+  onRequest?: (
+    _config: RequestOptions,
+    _context: PluginContext
+  ) => RequestOptions | Promise<RequestOptions>;
+  /** Called after response is parsed, before returning. Can modify response. */
+  onResponse?: (
+    _response: FetchXResponse,
+    _context: PluginContext
+  ) => FetchXResponse | Promise<FetchXResponse>;
+  /** Called on errors. Return a FetchXResponse to recover from the error. */
+  onError?: (
+    _error: FetchXError,
+    _context: PluginContext
+  ) =>
+    | FetchXResponse
+    | null
+    | undefined
+    | Promise<FetchXResponse | null | undefined>;
+  /** Called when a stream is created (stream/sse/ndjson). Can wrap the stream. */
+  onStream?: (
+    _stream: FetchXStream<unknown>,
+    _context: PluginContext
+  ) => FetchXStream<unknown> | Promise<FetchXStream<unknown>>;
 }

@@ -9,7 +9,7 @@ import {
   isSuccessStatus,
   isCancel,
 } from '../src/utils';
-import { FetchXError } from '../src/types';
+import { FetchXError, CancelError } from '../src/types';
 
 describe('Utils', () => {
   describe('serializeParams', () => {
@@ -20,7 +20,7 @@ describe('Utils', () => {
 
     it('should handle array params', () => {
       const result = serializeParams({ tags: ['tag1', 'tag2'] });
-      expect(result).toBe('tags=tag1&tags=tag2');
+      expect(result).toBe('tags%5B%5D=tag1&tags%5B%5D=tag2');
     });
 
     it('should skip null and undefined values', () => {
@@ -45,6 +45,18 @@ describe('Utils', () => {
     it('should handle boolean values', () => {
       const result = serializeParams({ active: true, verified: false });
       expect(result).toBe('active=true&verified=false');
+    });
+
+    it('should handle nested objects using bracket notation', () => {
+      const result = serializeParams({
+        filter: { status: 'active', age: '25' },
+      });
+      expect(result).toBe('filter%5Bstatus%5D=active&filter%5Bage%5D=25');
+    });
+
+    it('should handle deeply nested objects', () => {
+      const result = serializeParams({ query: { match: { name: 'test' } } });
+      expect(result).toBe('query%5Bmatch%5D%5Bname%5D=test');
     });
   });
 
@@ -250,13 +262,8 @@ describe('Utils', () => {
   });
 
   describe('isCancel', () => {
-    it('should return true for FetchX ERR_CANCELED', () => {
-      const error = { code: 'ERR_CANCELED' };
-      expect(isCancel(error)).toBe(true);
-    });
-
-    it('should return true for FetchX ECONNABORTED', () => {
-      const error = { code: 'ECONNABORTED' };
+    it('should return true for CancelError instance', () => {
+      const error = new CancelError();
       expect(isCancel(error)).toBe(true);
     });
 
@@ -266,30 +273,31 @@ describe('Utils', () => {
       expect(isCancel(error)).toBe(true);
     });
 
-    it('should return true for Axios CanceledError', () => {
+    it('should return true for FetchXError with ERR_CANCELED code', () => {
+      const error = new FetchXError('Canceled', undefined, 'ERR_CANCELED');
+      expect(isCancel(error)).toBe(true);
+    });
+
+    it('should return false for ECONNABORTED (timeout, not cancel)', () => {
+      const error = new FetchXError('Timeout', undefined, 'ECONNABORTED');
+      expect(isCancel(error)).toBe(false);
+    });
+
+    it('should return false for CanceledError name (axios compat removed)', () => {
       const error = new Error('Request canceled');
       error.name = 'CanceledError';
-      expect(isCancel(error)).toBe(true);
+      expect(isCancel(error)).toBe(false);
     });
 
-    it('should return true for Axios __CANCEL__ flag', () => {
+    it('should return false for __CANCEL__ flag (axios compat removed)', () => {
       const error = { __CANCEL__: true, message: 'Canceled' };
-      expect(isCancel(error)).toBe(true);
+      expect(isCancel(error)).toBe(false);
     });
 
-    it('should return true for "cancel" in message', () => {
-      const error = new Error('Request was canceled by user');
-      expect(isCancel(error)).toBe(true);
-    });
-
-    it('should return true for "abort" in message', () => {
-      const error = new Error('The request was aborted');
-      expect(isCancel(error)).toBe(true);
-    });
-
-    it('should return true for uppercase keywords', () => {
-      const error = new Error('REQUEST CANCELED');
-      expect(isCancel(error)).toBe(true);
+    it('should return false for message keyword heuristics (removed)', () => {
+      expect(isCancel(new Error('Request was canceled by user'))).toBe(false);
+      expect(isCancel(new Error('The request was aborted'))).toBe(false);
+      expect(isCancel(new Error('REQUEST CANCELED'))).toBe(false);
     });
 
     it('should return false for non-cancel errors', () => {
@@ -312,11 +320,6 @@ describe('Utils', () => {
 
     it('should return false for empty object', () => {
       expect(isCancel({})).toBe(false);
-    });
-
-    it('should return true for FetchXError with ERR_CANCELED code', () => {
-      const error = new FetchXError('Canceled', undefined, 'ERR_CANCELED');
-      expect(isCancel(error)).toBe(true);
     });
   });
 });
