@@ -1,6 +1,6 @@
 # FetchX 核心漏洞 & 改进跟踪
 
-本文档记录 FetchX 当前版本中的已知缺陷、设计缺口和改进计划，按版本组织。
+本文档记录 FetchX 已知缺陷、设计缺口和改进计划，按版本组织。
 
 ---
 
@@ -30,82 +30,52 @@
 
 ---
 
-## 非流式现存缺陷（v1.0 ~ v1.3）
+## 非流式现存缺陷（v1.0 ~ v1.3）— 全部修复
 
-> 审计时间：v1.3 完成后。目的：识别运行时缺陷。
+> 审计时间：v1.3 完成后。所有问题已在 v1.5 ~ v2.0 修复。
 
 ### 已确认 Bug
 
 #### B1 — FormData body 被默认 Content-Type 破坏（高）
 
-- **文件**：`src/FetchX.ts:239` + `src/FetchX.ts:79`
-- **原因**：实例默认 `Content-Type: application/json` 通过 `new Headers(...)` 传入 fetch。浏览器只在 Content-Type **未设置**时才为 FormData 自动追加 `multipart/form-data; boundary=...`
-- **影响**：所有 `api.post(url, formData)` 请求的 Content-Type 为 `application/json`，服务端无法解析
-- **复现**：`createFetchX().post('/upload', new FormData())`
-- **临时绕过**：`api.post('/upload', fd, { headers: {} })` 或通过请求拦截器清空 Content-Type
+- **文件**：`packages/fetchx/src/FetchX.ts`
+- **状态**：✅ v1.5 修复 — FormData body 时自动移除 Content-Type 头
 
 #### B2 — URLSearchParams body 被 JSON.stringify 为 `{}`（中）
 
-- **文件**：`src/utils.ts:60-79` (`serializeBody`)
-- **原因**：`URLSearchParams instanceof` 不匹配 FormData/Blob/ArrayBuffer，`typeof` 为 `'object'`，落入 `JSON.stringify` → 输出 `{}`
-- **影响**：`application/x-www-form-urlencoded` POST 场景完全不可用
-- **复现**：`api.post('/login', new URLSearchParams({ user: 'a', pass: 'b' }))`
+- **文件**：`packages/fetchx/src/utils.ts`
+- **状态**：✅ v1.5 修复 — `serializeBody` 增加 `URLSearchParams` 分支
 
 #### B3 — HEAD/204 + responseType:'json' 抛原生 SyntaxError（中）
 
-- **文件**：`src/utils.ts:137` (`parseResponse`, `response.json()`)
-- **原因**：空 body 调用 `response.json()` 时浏览器抛出 `SyntaxError`，未被包裹为 `FetchXError`
-- **影响**：HEAD 请求配置 `responseType: 'json'` 时报错无结构化信息
-- **复现**：`api.head('/resource', { responseType: 'json' })`
+- **文件**：`packages/fetchx/src/utils.ts`
+- **状态**：✅ v1.5 修复 — 空 body 的 `response.json()` 降级处理
 
 ### 设计缺口
 
 #### D1 — 响应仅返回 `T`，不返回 `FetchXResponse<T>`
 
-- **文件**：`src/FetchX.ts:360` + `src/types.ts:116-122`
-- **现状**：`api.get<User>()` 返回裸 `User` 对象。`buildFetchXResponse` 工具函数存在但从未调用（死代码）
-- **影响**：用户无法访问 `status`/`headers`/`statusText`。与 axios `{ data, status, headers }` 风格不一致
-- **备选方案**：
-  - A) 保持现状，简洁优先
-  - B) 返回 `FetchXResponse<T>`，对齐 axios
-  - C) 返回 `T` 但通过第二个参数/拦截器暴露 metadata
+- **文件**：`packages/fetchx/src/FetchX.ts`
+- **状态**：✅ v1.5 修复 — 响应统一返回 `FetchXResponse<T>`（data + status/headers）
 
 #### D2 — Content-Type 自动检测大小写敏感（低）
 
-- **文件**：`src/utils.ts:151-165`
-- **现状**：`contentType.includes('application/json')` 是大小写敏感的。如果服务端返回 `Application/Json` 会 fallthrough 到 blob
-- **影响**：极低概率，HTTP 规范推荐小写 media type
+- **文件**：`packages/fetchx/src/utils.ts`
+- **状态**：✅ v2.0 修复 — `contentType.toLowerCase().includes(...)`
 
 #### D3 — formData() 解析不支持旧环境（低）
 
-- **文件**：`src/utils.ts:161`
-- **现状**：`response.formData()` 在某些旧 Node.js fetch 实现中不可用
-- **影响**：旧环境无降级方案
+- **文件**：`packages/fetchx/src/utils.ts`
+- **状态**：✅ v2.0 修复 — try-catch 降级到 `response.blob()`
 
----
+### 技术债
 
-## v1.5 — 核心缺陷修复 ✅ 已完成
+#### T1 — FetchXStream abort 信号链路不闭环（低）
 
-### 修复内容
+- **文件**：`packages/fetchx/src/stream.ts` + `packages/fetchx/src/FetchX.ts`
+- **状态**：✅ v2.0 修复 — `FetchXStream` 接受外部 `AbortSignal`，双向绑定
 
-- **B1** ✅：FormData body 时自动移除 Content-Type 头
-- **B2** ✅：`serializeBody` 增加 `URLSearchParams` 分支
-- **B3** ✅：`parseResponse` 对空 body 的 `response.json()` 降级处理
-- **D1** ✅：响应返回 `FetchXResponse<T>`（数据 + status/headers）
+#### T2 — FetchXError.response 从未填充（低）
 
-## v1.4 已知技术债
-
-> 非阻塞问题，不影响 v2.0 开发。记录以备后续改进。
-
-### T1 — FetchXStream abort 信号链路不闭环（低）
-
-- **现状**：`_streamRequest` 内部将外部 `AbortSignal` 链接到内部 controller，但返回的 `FetchXStream` 使用的是独立的 `AbortController`。`stream.abort()` 能停止流消费，但无法向上游通知调用方。
-- **影响**：调用方用独立 `AbortController` 取消流时，`stream.abort()` 的状态不同步。不影响正常使用场景。
-- **改进方向**：`FetchXStream` 接受外部 signal 引用，双向绑定。
-
-### T2 — FetchXError.response 从未填充（低）
-
-- **文件**：`src/types.ts:132` (`FetchXError.response?: FetchXResponse`)
-- **现状**：HTTP 错误（ERR_BAD_RESPONSE）时，`FetchXError` 有 `status` 字段但 `response` 字段始终为 `undefined`。错误响应体丢失。
-- **影响**：用户无法从错误对象中读取服务端返回的错误详情（如 JSON error body）。需自行通过拦截器处理。
-- **改进方向**：在 `_request` 的 `validateStatus` 失败时，尝试解析响应体并填充 `FetchXError.response`。
+- **文件**：`packages/fetchx/src/types.ts` + `packages/fetchx/src/FetchX.ts`
+- **状态**：✅ v1.5 已修复 — `validateStatus` 失败时 parse body 并传入 `HTTPError.response`

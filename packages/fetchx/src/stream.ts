@@ -113,16 +113,32 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
   private _response: Response;
   private _config: RequestOptions;
   private _controller: AbortController;
+  private _externalSignal?: AbortSignal;
+  private _onExternalAbort: (() => void) | null = null;
 
   constructor(
     response: Response,
     config: RequestOptions,
-    controller: AbortController
+    controller: AbortController,
+    externalSignal?: AbortSignal
   ) {
     this._response = response;
     this._config = config;
     this._controller = controller;
+    this._externalSignal = externalSignal;
     this.reader = response.body?.getReader() ?? null;
+
+    // Link external signal to abort this stream
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        this.abort();
+      } else {
+        this._onExternalAbort = () => this.abort();
+        externalSignal.addEventListener('abort', this._onExternalAbort, {
+          once: true,
+        });
+      }
+    }
   }
 
   /** The underlying HTTP response (status, statusText, headers). */
@@ -144,12 +160,14 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
     };
   }
 
-  /** Cancel the stream. Safe to call multiple times. */
+  /** Cancel the stream and detach external signal listener. Safe to call multiple times. */
   abort(): void {
     this._controller.abort();
     this.reader?.cancel().catch(() => {});
-    // Don't null reader here — let the running iterator's
-    // releaseReader() clean up when the cancelled read resolves.
+    if (this._onExternalAbort && this._externalSignal) {
+      this._externalSignal.removeEventListener('abort', this._onExternalAbort);
+    }
+    this._onExternalAbort = null;
   }
 
   /** Release the reader when done. Called by subclasses in finally blocks. */

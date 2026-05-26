@@ -634,7 +634,12 @@ export class FetchX {
       rest
     );
     const controller = new AbortController();
-    const stream = new Uint8ArrayStream(response, config, controller);
+    const stream = new Uint8ArrayStream(
+      response,
+      config,
+      controller,
+      config.signal
+    );
     return this.pluginManager.runOnStream(
       stream,
       { url, method },
@@ -673,7 +678,12 @@ export class FetchX {
       rest
     );
     const controller = new AbortController();
-    const sseStream = new SSEStream(response, config, controller);
+    const sseStream = new SSEStream(
+      response,
+      config,
+      controller,
+      config.signal
+    );
     return this.pluginManager.runOnStream(
       sseStream,
       { url, method },
@@ -702,7 +712,12 @@ export class FetchX {
       rest
     );
     const controller = new AbortController();
-    const ndjsonStream = new NDJSONStream<T>(response, config, controller);
+    const ndjsonStream = new NDJSONStream<T>(
+      response,
+      config,
+      controller,
+      config.signal
+    );
     return this.pluginManager.runOnStream(
       ndjsonStream,
       { url, method },

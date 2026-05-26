@@ -171,13 +171,17 @@ export async function parseResponse(
       case 'arrayBuffer':
         return response.arrayBuffer();
       case 'formData':
-        return response.formData();
+        try {
+          return await response.formData();
+        } catch {
+          return response.blob();
+        }
       default:
         break;
     }
   }
 
-  const contentType = response.headers.get('content-type');
+  const contentType = response.headers.get('content-type')?.toLowerCase();
 
   if (contentType?.includes('application/json')) {
     try {
@@ -192,7 +196,11 @@ export async function parseResponse(
   }
 
   if (contentType?.includes('multipart/form-data')) {
-    return response.formData();
+    try {
+      return await response.formData();
+    } catch {
+      return response.blob();
+    }
   }
 
   return response.blob();
