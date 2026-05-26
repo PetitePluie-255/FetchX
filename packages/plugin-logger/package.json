@@ -1,6 +1,6 @@
 {
   "name": "@petite-pluie/fetchx-logger",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Logger plugin for FetchX HTTP client",
   "repository": {
     "type": "git",
@@ -34,6 +34,9 @@
   ],
   "publishConfig": {
     "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "peerDependencies": {
     "@petite-pluie/fetchx": ">=0.1.0",
