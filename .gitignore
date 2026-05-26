@@ -44,3 +44,7 @@ coverage/
 # Cache
 .cache/
 .parcel-cache/
+
+# VitePress
+docs/.vitepress/cache/
+docs/.vitepress/dist/

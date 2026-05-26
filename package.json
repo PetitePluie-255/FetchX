@@ -26,7 +26,10 @@
     "verify": "pnpm install --frozen-lockfile && pnpm -r build && pnpm -r test && pnpm lint && pnpm -r type-check",
     "release:fetchx": "pnpm verify && cd packages/fetchx && release-it",
     "release:logger": "pnpm verify && cd packages/plugin-logger && release-it",
-    "release": "pnpm run release:fetchx"
+    "release": "pnpm run release:fetchx",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "packageManager": "pnpm@10.12.4",
   "engines": {
@@ -62,6 +65,7 @@
     "typescript-eslint": "^8.60.0",
     "vite": "^8.0.14",
     "vite-plugin-dts": "^5.0.1",
+    "vitepress": "^1.6.4",
     "vitest": "^4.1.7"
   }
 }
