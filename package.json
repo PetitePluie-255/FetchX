@@ -23,7 +23,7 @@
     "commit": "cz",
     "prepare": "husky",
     "lint-staged": "lint-staged",
-    "verify": "pnpm install --frozen-lockfile && pnpm -r test && pnpm lint && pnpm -r type-check && pnpm -r build",
+    "verify": "pnpm install --frozen-lockfile && pnpm -r build && pnpm -r test && pnpm lint && pnpm -r type-check",
     "release:fetchx": "pnpm verify && cd packages/fetchx && release-it",
     "release:logger": "pnpm verify && cd packages/plugin-logger && release-it",
     "release": "pnpm run release:fetchx"
