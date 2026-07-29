@@ -123,6 +123,11 @@ export function mergeConfig(
   return {
     baseURL: instanceConfig.baseURL,
     timeout: requestOptions.timeout ?? instanceConfig.timeout,
+    connectTimeout:
+      requestOptions.connectTimeout ?? instanceConfig.connectTimeout,
+    idleTimeout: requestOptions.idleTimeout ?? instanceConfig.idleTimeout,
+    throwHttpErrors:
+      requestOptions.throwHttpErrors ?? instanceConfig.throwHttpErrors,
     credentials: requestOptions.credentials ?? instanceConfig.credentials,
     validateStatus:
       requestOptions.validateStatus ?? instanceConfig.validateStatus,

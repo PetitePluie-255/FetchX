@@ -63,7 +63,14 @@ export interface CacheConfig {
 export interface FetchXConfig {
   baseURL?: string;
   headers?: Record<string, string>;
+  /** Request timeout in ms. Used as the stream connection timeout fallback. */
   timeout?: number;
+  /** Streaming connection timeout in ms. Covers waiting for response headers. */
+  connectTimeout?: number;
+  /** Streaming idle timeout in ms. Resets whenever a chunk is received. */
+  idleTimeout?: number;
+  /** Throw HTTPError when validateStatus rejects a response. Default: true */
+  throwHttpErrors?: boolean;
   credentials?: RequestCredentials;
   validateStatus?: (_status: number) => boolean;
   responseType?: ResponseType;
@@ -144,11 +151,17 @@ export class NetworkError extends FetchXError {
  */
 export class TimeoutError extends FetchXError {
   readonly timeout: number;
+  readonly phase: 'request' | 'connect' | 'idle';
 
-  constructor(timeout: number, config?: RequestOptions) {
+  constructor(
+    timeout: number,
+    config?: RequestOptions,
+    phase: 'request' | 'connect' | 'idle' = 'request'
+  ) {
     super('Request timeout', config, 'ECONNABORTED');
     this.name = 'TimeoutError';
     this.timeout = timeout;
+    this.phase = phase;
   }
 }
 

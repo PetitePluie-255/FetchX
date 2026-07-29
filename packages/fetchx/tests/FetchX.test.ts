@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFetchX } from '../src/FetchX';
-import { FetchXError, CancelError } from '../src/types';
+import {
+  FetchXError,
+  CancelError,
+  HTTPError,
+  type TimeoutError,
+} from '../src/types';
 import { FetchXStream } from '../src/stream';
 
 // Helper: create a ReadableStream<Uint8Array> for mock fetch responses
@@ -845,28 +850,72 @@ describe('FetchX', () => {
       expect(entries[1]).toEqual({ id: 2 });
     });
 
-    it('should NOT throw on HTTP error for SSE stream', async () => {
+    it('should throw HTTPError with parsed body for SSE by default', async () => {
       mockFetch.mockResolvedValueOnce(
-        new Response(mockStreamBody(['data: {"error":"unauthorized"}\n\n']), {
+        new Response(JSON.stringify({ error: 'unauthorized' }), {
           status: 401,
           statusText: 'Unauthorized',
-          headers: new Headers(),
+          headers: new Headers({ 'content-type': 'application/json' }),
         })
       );
 
       const api = createFetchX();
-      const stream = await api.sse('/chat');
+      const error = await api.sse('/chat').catch(value => value as HTTPError);
+
+      expect(error).toBeInstanceOf(HTTPError);
+      expect(error.status).toBe(401);
+      expect(error.response.data).toEqual({ error: 'unauthorized' });
+    });
+
+    it('should leave the response body unlocked when HTTP errors are allowed', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'unauthorized' }), {
+          status: 401,
+          statusText: 'Unauthorized',
+          headers: new Headers({ 'content-type': 'application/json' }),
+        })
+      );
+
+      const api = createFetchX();
+      const stream = await api.sse('/chat', { throwHttpErrors: false });
 
       expect(stream.response.status).toBe(401);
-      expect(stream.response.ok).toBe(false);
+      expect(stream.response.body?.locked).toBe(false);
+      await expect(stream.response.json()).resolves.toEqual({
+        error: 'unauthorized',
+      });
+    });
 
-      const events: Array<{ data: string }> = [];
-      for await (const event of stream) {
-        events.push(event);
+    it('should apply connectTimeout while waiting for response headers', async () => {
+      vi.useFakeTimers();
+      try {
+        mockFetch.mockImplementationOnce(
+          (_url: string, init: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              init.signal?.addEventListener(
+                'abort',
+                () =>
+                  reject(
+                    new DOMException('The operation was aborted', 'AbortError')
+                  ),
+                { once: true }
+              );
+            })
+        );
+
+        const api = createFetchX();
+        const pending = api.sse('/chat', { connectTimeout: 100 });
+        const assertion = expect(pending).rejects.toMatchObject({
+          name: 'TimeoutError',
+          timeout: 100,
+          phase: 'connect',
+        } satisfies Partial<TimeoutError>);
+
+        await vi.advanceTimersByTimeAsync(100);
+        await assertion;
+      } finally {
+        vi.useRealTimers();
       }
-
-      expect(events).toHaveLength(1);
-      expect(events[0].data).toBe('{"error":"unauthorized"}');
     });
   });
 });

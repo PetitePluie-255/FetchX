@@ -85,6 +85,9 @@ import { createFetchX } from '@petite-pluie/fetchx';
 const api = createFetchX({
   baseURL: 'https://api.example.com', // 基础 URL
   timeout: 10000, // 超时时间 (ms)，0 表示不超时
+  connectTimeout: 30000, // 流式请求等待响应头超时
+  idleTimeout: 60000, // 流式请求块间空闲超时
+  throwHttpErrors: true, // 状态校验失败时抛出 HTTPError
   headers: {
     // 默认请求头
     'Content-Type': 'application/json',
@@ -259,12 +262,9 @@ FetchX 提供三种流式请求方法，均返回 `FetchXStream<T>` 对象，支
 // AI Chat 流式调用（默认 POST + JSON body）
 const stream = api.sse('/chat/completions', {
   body: { model: 'gpt-4', messages: [...] },
+  connectTimeout: 30_000,
+  idleTimeout: 60_000,
 });
-
-// HTTP 错误不抛异常，通过 stream.response 检查
-if (!stream.response.ok) {
-  throw new Error(`SSE 连接失败: ${stream.response.status}`);
-}
 
 for await (const event of stream) {
   // event: { data: string, event?: string, id?: string, retry?: number }
@@ -641,6 +641,9 @@ function createFetchX<T = unknown>(config?: FetchXConfig): FetchXInstance<T>;
 | `body`               | `unknown`                                                               | 请求体，自动 JSON 序列化   |
 | `headers`            | `Record<string, string>`                                                | 请求头（合并到默认头）     |
 | `timeout`            | `number`                                                                | 本次请求超时时间           |
+| `connectTimeout`     | `number`                                                                | 流式请求等待响应头超时     |
+| `idleTimeout`        | `number`                                                                | 流式请求块间空闲超时       |
+| `throwHttpErrors`    | `boolean`                                                               | 状态校验失败时抛 HTTPError |
 | `signal`             | `AbortSignal`                                                           | 取消信号                   |
 | `baseURL`            | `string`                                                                | 覆盖实例的 baseURL         |
 | `credentials`        | `RequestCredentials`                                                    | 凭证模式                   |

@@ -10,6 +10,9 @@
 | `body`               | `unknown`                                                               | 请求体，自动 JSON 序列化   |
 | `headers`            | `Record<string, string>`                                                | 请求头（合并到默认头）     |
 | `timeout`            | `number`                                                                | 本次请求超时时间           |
+| `connectTimeout`     | `number`                                                                | 流式请求等待响应头超时     |
+| `idleTimeout`        | `number`                                                                | 流式请求块间空闲超时       |
+| `throwHttpErrors`    | `boolean`                                                               | 状态校验失败时抛 HTTPError |
 | `signal`             | `AbortSignal`                                                           | 取消信号                   |
 | `baseURL`            | `string`                                                                | 覆盖实例的 baseURL         |
 | `credentials`        | `RequestCredentials`                                                    | 凭证模式                   |

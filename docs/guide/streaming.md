@@ -8,12 +8,9 @@ FetchX 提供三种流式请求方法，均返回 `FetchXStream<T>`，支持 `fo
 // AI Chat 流式调用（默认 POST + JSON body）
 const stream = api.sse('/chat/completions', {
   body: { model: 'gpt-4', messages: [...] },
+  connectTimeout: 30_000,
+  idleTimeout: 60_000,
 });
-
-// HTTP 错误不抛异常，通过 stream.response 检查
-if (!stream.response.ok) {
-  throw new Error(`SSE 连接失败: ${stream.response.status}`);
-}
 
 for await (const event of stream) {
   // event: { data, event?, id?, retry? }
@@ -22,6 +19,25 @@ for await (const event of stream) {
   console.log(chunk);
 }
 ```
+
+默认情况下，`validateStatus` 判定失败会抛出 `HTTPError`，错误响应体位于
+`error.response.data`。如需自行处理原始错误响应，可关闭自动抛错；响应体在开始
+迭代前不会被锁定：
+
+```typescript
+const stream = await api.sse('/chat/completions', {
+  throwHttpErrors: false,
+});
+
+if (!stream.response.ok) {
+  const detail = await stream.response.json();
+  throw new Error(detail.message);
+}
+```
+
+`connectTimeout` 只覆盖等待响应头的阶段，未配置时沿用 `timeout`。
+`idleTimeout` 从开始迭代后生效，每收到一个数据块重新计时。超时时抛出的
+`TimeoutError.phase` 分别为 `connect` 或 `idle`。
 
 ### SSEEvent
 
@@ -75,4 +91,4 @@ const reader = (result.data as ReadableStream<Uint8Array>).getReader();
 | `for await...of`  | 异步迭代消费                              |
 
 > **注意**：流式请求不走响应拦截器（避免拦截器消费 body），但请求拦截器正常执行。
-> 不支持缓存/重试/去重。
+> 不支持缓存/重试/去重。平台特定的数据结构仍应由上层业务解析。

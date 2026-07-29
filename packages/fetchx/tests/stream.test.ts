@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   Uint8ArrayStream,
   SSEStream,
@@ -44,7 +44,7 @@ function mockStreamArgs(
   return [response, { url: '/test', method: 'GET' }, new AbortController()];
 }
 
-import type { RequestOptions } from '../src/types';
+import type { RequestOptions, TimeoutError } from '../src/types';
 
 // ──────────────────────────────────────────────
 //  Uint8ArrayStream
@@ -182,6 +182,25 @@ describe('SSEStream', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].data).toBe('hello');
+  });
+
+  it('should parse CRLF separators split across chunks', async () => {
+    const res = createMockResponse([
+      'event: message\r\ndata: first\r',
+      '\n\r',
+      '\ndata: second\r\n\r\n',
+    ]);
+    const stream = new SSEStream(...mockStreamArgs(res));
+
+    const events: SSEEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { event: 'message', data: 'first' },
+      { data: 'second' },
+    ]);
   });
 
   it('should not throw on HTTP error status — returns stream', async () => {
@@ -323,5 +342,61 @@ describe('FetchXStream', () => {
     expect(stream.meta.headers.get('x-a')).toBe('1');
     expect(stream.meta.config.url).toBe('/test');
     expect(stream.meta.config.method).toBe('POST');
+  });
+
+  it('should acquire the response reader lazily', () => {
+    const res = createMockResponse(['data']);
+    new Uint8ArrayStream(...mockStreamArgs(res));
+
+    expect(res.body?.locked).toBe(false);
+  });
+
+  it('should sanitize sensitive headers in meta config', () => {
+    const res = createMockResponse(['data']);
+    const stream = new Uint8ArrayStream(
+      res,
+      {
+        url: '/test',
+        headers: {
+          Authorization: 'Bearer secret',
+          'x-api-key': 'secret',
+          'x-request-id': 'safe',
+        },
+        sanitizeConfig: true,
+      },
+      new AbortController()
+    );
+
+    expect(stream.meta.config.headers).toEqual({ 'x-request-id': 'safe' });
+  });
+
+  it('should reject with an idle TimeoutError when no chunk arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const res = new Response(
+        new ReadableStream<Uint8Array>({
+          start() {
+            // Intentionally keep the stream open without sending data.
+          },
+        })
+      );
+      const stream = new Uint8ArrayStream(
+        res,
+        { url: '/slow', idleTimeout: 100 },
+        new AbortController()
+      );
+
+      const pending = stream[Symbol.asyncIterator]().next();
+      const assertion = expect(pending).rejects.toMatchObject({
+        name: 'TimeoutError',
+        timeout: 100,
+        phase: 'idle',
+      } satisfies Partial<TimeoutError>);
+      await vi.advanceTimersByTimeAsync(100);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

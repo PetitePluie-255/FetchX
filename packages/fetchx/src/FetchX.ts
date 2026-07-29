@@ -313,7 +313,10 @@ export class FetchX {
               );
 
               // Validate status — on failure, parse body and throw HTTPError
-              if (!validateStatus(trackedResponse.status)) {
+              if (
+                processedConfig.throwHttpErrors !== false &&
+                !validateStatus(trackedResponse.status)
+              ) {
                 const cloned = trackedResponse.clone();
                 const errorBody = await parseResponse(
                   cloned,
@@ -518,15 +521,19 @@ export class FetchX {
   /**
    * Internal shared pipeline for streaming requests.
    * Reuses mergeConfig, request interceptors, buildURL, serializeBody,
-   * signals, and timeout. Skips cache, retry, dedupe, concurrency,
-   * validateStatus, response interceptors, and parseResponse.
+   * signals, status validation, and connection timeout. Skips cache,
+   * retry, dedupe, concurrency, response interceptors, and success-body parsing.
    */
   private async _streamRequest(
     method: HttpMethod,
     url: string,
     body?: unknown,
     options: RequestOptions = {}
-  ): Promise<{ response: Response; config: RequestOptions }> {
+  ): Promise<{
+    response: Response;
+    config: RequestOptions;
+    controller: AbortController;
+  }> {
     // Merge config
     const merged = mergeConfig(this.config, options);
 
@@ -576,12 +583,17 @@ export class FetchX {
     // Set up abort controller (connection timeout only)
     const controller = new AbortController();
     const userSignal = processedConfig.signal;
-    const timeout = processedConfig.timeout ?? 0;
+    const connectTimeout =
+      processedConfig.connectTimeout ?? processedConfig.timeout ?? 0;
+    let timedOut = false;
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    if (timeout > 0) {
-      timeoutId = setTimeout(() => controller.abort(), timeout);
+    if (connectTimeout > 0) {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, connectTimeout);
     }
 
     // Chain external signals to our controller
@@ -597,11 +609,35 @@ export class FetchX {
         credentials: processedConfig.credentials,
       });
 
-      return { response, config: processedConfig };
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
+
+      const validateStatus = processedConfig.validateStatus ?? isSuccessStatus;
+      if (
+        processedConfig.throwHttpErrors !== false &&
+        !validateStatus(response.status)
+      ) {
+        const errorBody = await parseResponse(
+          response.clone(),
+          processedConfig.responseType
+        );
+        const errorResponse = buildFetchXResponse(
+          errorBody,
+          response,
+          processedConfig
+        );
+        throw new HTTPError(response.status, errorResponse, processedConfig);
+      }
+
+      return { response, config: processedConfig, controller };
     } catch (error: unknown) {
+      if (error instanceof FetchXError) throw error;
+
       if (error instanceof DOMException && error.name === 'AbortError') {
-        if (controller.signal.aborted && !userSignal?.aborted) {
-          throw new TimeoutError(timeout, processedConfig);
+        if (timedOut) {
+          throw new TimeoutError(connectTimeout, processedConfig, 'connect');
         }
         throw new CancelError(processedConfig);
       }
@@ -627,13 +663,12 @@ export class FetchX {
   ): Promise<FetchXStream<Uint8Array>> {
     const merged = { method: 'GET' as HttpMethod, ...options };
     const { method = 'GET', body, ...rest } = merged;
-    const { response, config } = await this._streamRequest(
+    const { response, config, controller } = await this._streamRequest(
       method as HttpMethod,
       url,
       body,
       rest
     );
-    const controller = new AbortController();
     const stream = new Uint8ArrayStream(
       response,
       config,
@@ -671,13 +706,12 @@ export class FetchX {
       ...options,
     };
     const { method = 'POST', body, ...rest } = merged;
-    const { response, config } = await this._streamRequest(
+    const { response, config, controller } = await this._streamRequest(
       method as HttpMethod,
       url,
       body,
       rest
     );
-    const controller = new AbortController();
     const sseStream = new SSEStream(
       response,
       config,
@@ -705,13 +739,12 @@ export class FetchX {
   ): Promise<FetchXStream<T>> {
     const merged = { method: 'GET' as HttpMethod, ...options };
     const { method = 'GET', body, ...rest } = merged;
-    const { response, config } = await this._streamRequest(
+    const { response, config, controller } = await this._streamRequest(
       method as HttpMethod,
       url,
       body,
       rest
     );
-    const controller = new AbortController();
     const ndjsonStream = new NDJSONStream<T>(
       response,
       config,

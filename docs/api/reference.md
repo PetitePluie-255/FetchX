@@ -59,6 +59,9 @@ interface FetchXResponse<T = unknown> {
 interface FetchXConfig {
   baseURL?: string;
   timeout?: number;
+  connectTimeout?: number;
+  idleTimeout?: number;
+  throwHttpErrors?: boolean;
   headers?: Record<string, string>;
   credentials?: RequestCredentials;
   validateStatus?: (status: number) => boolean;
@@ -77,7 +80,7 @@ interface FetchXConfig {
 | -------------------- | ------------------ | -------------------------- |
 | `FetchXError`        | —                  | 基类                       |
 | `NetworkError`       | `ERR_NETWORK`      | 网络连接失败               |
-| `TimeoutError`       | `ECONNABORTED`     | 请求超时                   |
+| `TimeoutError`       | `ECONNABORTED`     | 请求超时（phase 标识阶段） |
 | `CancelError`        | `ERR_CANCELED`     | 用户取消                   |
 | `HTTPError&lt;T&gt;` | `ERR_BAD_RESPONSE` | HTTP 错误（携带 response） |
 

@@ -1,4 +1,9 @@
-import type { FetchXResponse, RequestOptions } from './types';
+import {
+  TimeoutError,
+  type FetchXResponse,
+  type RequestOptions,
+} from './types';
+import { buildFetchXResponse } from './utils';
 
 /**
  * A parsed SSE (Server-Sent Events) event.
@@ -29,14 +34,20 @@ class SSEParser {
     this.buffer += chunk;
     const events: SSEEvent[] = [];
 
-    // Events are separated by double newlines
-
     while (true) {
-      const idx = this.buffer.indexOf('\n\n');
-      if (idx === -1) break;
+      // A blank line dispatches an event. Line endings may be LF, CRLF, or CR.
+      const separator =
+        /\r\n\r\n|\r\n\r|\r\n\n|\r\r\n|\r\r|\n\r\n|\n\r|\n\n/.exec(this.buffer);
+      if (separator?.index === undefined) break;
 
+      const idx = separator.index;
+      const separatorEnd = idx + separator[0].length;
+      // A trailing CR may be the first half of a CRLF split across chunks.
+      if (separatorEnd === this.buffer.length && separator[0].endsWith('\r')) {
+        break;
+      }
       const raw = this.buffer.slice(0, idx);
-      this.buffer = this.buffer.slice(idx + 2);
+      this.buffer = this.buffer.slice(separatorEnd);
 
       const event = this.parseEvent(raw);
       if (event) events.push(event);
@@ -59,7 +70,7 @@ class SSEParser {
     const event: SSEEvent = { data: '' };
     let hasField = false;
 
-    for (const line of raw.split('\n')) {
+    for (const line of raw.split(/\r\n|\r|\n/)) {
       // Lines starting with ':' are comments (skip)
       if (!line || line.startsWith(':')) continue;
 
@@ -126,7 +137,7 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
     this._config = config;
     this._controller = controller;
     this._externalSignal = externalSignal;
-    this.reader = response.body?.getReader() ?? null;
+    this.reader = null;
 
     // Link external signal to abort this stream
     if (externalSignal) {
@@ -151,19 +162,70 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
    * who want status/headers access.
    */
   get meta(): FetchXResponse<undefined> {
-    return {
-      data: undefined,
-      status: this._response.status,
-      statusText: this._response.statusText,
-      headers: this._response.headers,
-      config: this._config,
-    };
+    return buildFetchXResponse(undefined, this._response, this._config);
   }
 
   /** Cancel the stream and detach external signal listener. Safe to call multiple times. */
   abort(): void {
     this._controller.abort();
-    this.reader?.cancel().catch(() => {});
+    if (this.reader) {
+      this.reader.cancel().catch(() => {});
+    } else {
+      this._response.body?.cancel().catch(() => {});
+    }
+    this.detachExternalSignal();
+  }
+
+  /** Acquire the response reader only when iteration starts. */
+  private getReader(): ReadableStreamDefaultReader<Uint8Array> | null {
+    this.reader ??= this._response.body?.getReader() ?? null;
+    return this.reader;
+  }
+
+  /**
+   * Read one chunk and fail if the connection remains idle for too long.
+   * Starting a new read resets the idle timeout.
+   */
+  protected readChunk(): Promise<ReadableStreamReadResult<Uint8Array>> {
+    const reader = this.getReader();
+    if (!reader) {
+      return Promise.resolve({ done: true, value: undefined });
+    }
+
+    const idleTimeout = this._config.idleTimeout ?? 0;
+    if (idleTimeout <= 0) {
+      return reader.read();
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const error = new TimeoutError(idleTimeout, this.meta.config, 'idle');
+        this._controller.abort(error);
+        reader.cancel(error).catch(() => {});
+        reject(error);
+      }, idleTimeout);
+
+      reader.read().then(
+        result => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve(result);
+        },
+        error => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(error);
+        }
+      );
+    });
+  }
+
+  private detachExternalSignal(): void {
     if (this._onExternalAbort && this._externalSignal) {
       this._externalSignal.removeEventListener('abort', this._onExternalAbort);
     }
@@ -180,6 +242,7 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
       }
       this.reader = null;
     }
+    this.detachExternalSignal();
   }
 
   abstract [Symbol.asyncIterator](): AsyncIterator<T>;
@@ -192,8 +255,8 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
 export class Uint8ArrayStream extends FetchXStream<Uint8Array> {
   async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
     try {
-      while (this.reader) {
-        const { done, value } = await this.reader.read();
+      while (true) {
+        const { done, value } = await this.readChunk();
         if (done) break;
         yield value;
       }
@@ -209,13 +272,12 @@ export class Uint8ArrayStream extends FetchXStream<Uint8Array> {
 
 export class SSEStream extends FetchXStream<SSEEvent> {
   async *[Symbol.asyncIterator](): AsyncIterator<SSEEvent> {
-    if (!this.reader) return;
     const parser = new SSEParser();
     const decoder = new TextDecoder();
 
     try {
       while (true) {
-        const { done, value } = await this.reader.read();
+        const { done, value } = await this.readChunk();
         if (done) break;
 
         const text = decoder.decode(value, { stream: true });
@@ -249,13 +311,12 @@ export class SSEStream extends FetchXStream<SSEEvent> {
 
 export class NDJSONStream<T = unknown> extends FetchXStream<T> {
   async *[Symbol.asyncIterator](): AsyncIterator<T> {
-    if (!this.reader) return;
     const decoder = new TextDecoder();
     let buffer = '';
 
     try {
       while (true) {
-        const { done, value } = await this.reader.read();
+        const { done, value } = await this.readChunk();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
