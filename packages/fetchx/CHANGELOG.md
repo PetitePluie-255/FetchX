@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1 (2026-07-29)
+
+### Fixed
+
+- Reject pre-canceled streaming requests before calling `fetch`.
+- Sanitize request headers in all exposed error configs.
+- Preserve SSE defaults when custom headers are provided.
+- Apply custom `paramsSerializer` functions to streaming URLs.
+- Dispatch only SSE messages containing a `data` field and preserve SSE state.
+
+### Changed
+
+- Yield application-level SSE markers such as `[DONE]` unchanged.
+- Cancel the response body when a consumer stops stream iteration early.
+
 ## 0.2.0 (2026-07-29)
 
 ### Features
