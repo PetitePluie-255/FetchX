@@ -268,6 +268,7 @@ const stream = api.sse('/chat/completions', {
 
 for await (const event of stream) {
   // event: { data: string, event?: string, id?: string, retry?: number }
+  // FetchX 原样输出 data；结束标记由调用方解释
   if (event.data === '[DONE]') break;
   const chunk = JSON.parse(event.data);
   console.log(chunk);

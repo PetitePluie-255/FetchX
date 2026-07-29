@@ -22,6 +22,7 @@ import {
   isSuccessStatus,
   mergeConfig,
   parseResponse,
+  sanitizeRequestConfig,
   serializeBody,
 } from './utils';
 import { CacheStore, createCacheKey } from './cache';
@@ -171,6 +172,7 @@ export class FetchX {
       },
       processedConfig.plugins
     );
+    const errorConfig = sanitizeRequestConfig(processedConfig);
 
     // Build full URL
     const fullURL = buildURL(
@@ -202,7 +204,7 @@ export class FetchX {
           status: cacheEntry.status,
           statusText: cacheEntry.statusText,
           headers: new Headers(cacheEntry.headers),
-          config: processedConfig,
+          config: errorConfig,
         } satisfies FetchXResponse<T>;
       }
     }
@@ -244,7 +246,7 @@ export class FetchX {
 
             // Check if any external signal is already aborted
             if (mergedSignal?.aborted) {
-              throw new CancelError(processedConfig);
+              throw new CancelError(errorConfig);
             }
 
             let requestSignal: AbortSignal | undefined = mergedSignal;
@@ -330,7 +332,7 @@ export class FetchX {
                 throw new HTTPError(
                   trackedResponse.status,
                   errorResponse,
-                  processedConfig
+                  errorConfig
                 );
               }
 
@@ -342,12 +344,12 @@ export class FetchX {
               if (fetchError instanceof Error) {
                 // Timeout
                 if (timedOut || fetchError.name === 'TimeoutError') {
-                  throw new TimeoutError(timeout ?? 0, processedConfig);
+                  throw new TimeoutError(timeout ?? 0, errorConfig);
                 }
 
                 // User-initiated cancel
                 if (fetchError.name === 'AbortError') {
-                  throw new CancelError(processedConfig);
+                  throw new CancelError(errorConfig);
                 }
 
                 // Streaming upload not supported (duplex: 'half' + ReadableStream)
@@ -357,7 +359,7 @@ export class FetchX {
                     markStreamingSupported(false);
                     throw new FetchXError(
                       msg,
-                      processedConfig,
+                      errorConfig,
                       'ERR_NOT_SUPPORTED'
                     );
                   }
@@ -368,7 +370,7 @@ export class FetchX {
                   fetchError.name === 'TypeError' &&
                   fetchError.message.includes('fetch') === true
                 ) {
-                  throw new NetworkError(processedConfig);
+                  throw new NetworkError(errorConfig);
                 }
               }
 
@@ -557,12 +559,18 @@ export class FetchX {
       },
       processedConfig.plugins
     );
+    const errorConfig = sanitizeRequestConfig(processedConfig);
+    const userSignal = processedConfig.signal;
+    if (userSignal?.aborted) {
+      throw new CancelError(errorConfig);
+    }
 
     // Build URL
     const fullURL = buildURL(
       processedConfig.baseURL ?? '',
       processedConfig.url ?? url,
-      processedConfig.params
+      processedConfig.params,
+      processedConfig.paramsSerializer
     );
 
     // Serialize body
@@ -582,7 +590,6 @@ export class FetchX {
 
     // Set up abort controller (connection timeout only)
     const controller = new AbortController();
-    const userSignal = processedConfig.signal;
     const connectTimeout =
       processedConfig.connectTimeout ?? processedConfig.timeout ?? 0;
     let timedOut = false;
@@ -597,7 +604,7 @@ export class FetchX {
     }
 
     // Chain external signals to our controller
-    const onExternalAbort = () => controller.abort();
+    const onExternalAbort = () => controller.abort(userSignal?.reason);
     userSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
     try {
@@ -628,7 +635,7 @@ export class FetchX {
           response,
           processedConfig
         );
-        throw new HTTPError(response.status, errorResponse, processedConfig);
+        throw new HTTPError(response.status, errorResponse, errorConfig);
       }
 
       return { response, config: processedConfig, controller };
@@ -637,12 +644,12 @@ export class FetchX {
 
       if (error instanceof DOMException && error.name === 'AbortError') {
         if (timedOut) {
-          throw new TimeoutError(connectTimeout, processedConfig, 'connect');
+          throw new TimeoutError(connectTimeout, errorConfig, 'connect');
         }
-        throw new CancelError(processedConfig);
+        throw new CancelError(errorConfig);
       }
 
-      throw new NetworkError(processedConfig);
+      throw new NetworkError(errorConfig);
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       userSignal?.removeEventListener('abort', onExternalAbort);
@@ -697,13 +704,15 @@ export class FetchX {
     url: string,
     options?: RequestOptions
   ): Promise<FetchXStream<SSEEvent>> {
+    const { headers: optionHeaders, ...optionRest } = options ?? {};
     const merged = {
       method: 'POST' as HttpMethod,
+      ...optionRest,
       headers: {
         Accept: 'text/event-stream',
         'Content-Type': 'application/json',
+        ...optionHeaders,
       },
-      ...options,
     };
     const { method = 'POST', body, ...rest } = merged;
     const { response, config, controller } = await this._streamRequest(

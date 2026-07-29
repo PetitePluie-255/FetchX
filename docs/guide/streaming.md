@@ -14,6 +14,7 @@ const stream = api.sse('/chat/completions', {
 
 for await (const event of stream) {
   // event: { data, event?, id?, retry? }
+  // FetchX 会原样输出 data；结束标记由调用方按自身协议解释
   if (event.data === '[DONE]') break;
   const chunk = JSON.parse(event.data);
   console.log(chunk);
@@ -38,6 +39,9 @@ if (!stream.response.ok) {
 `connectTimeout` 只覆盖等待响应头的阶段，未配置时沿用 `timeout`。
 `idleTimeout` 从开始迭代后生效，每收到一个数据块重新计时。超时时抛出的
 `TimeoutError.phase` 分别为 `connect` 或 `idle`。
+
+FetchX 不解释 `[DONE]` 或其他应用层结束标记。调用方提前结束
+`for await...of` 迭代时，FetchX 会取消剩余响应体。
 
 ### SSEEvent
 

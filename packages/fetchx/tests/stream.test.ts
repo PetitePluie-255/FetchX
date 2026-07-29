@@ -154,7 +154,7 @@ describe('SSEStream', () => {
     expect(events[0].data).toBe('real');
   });
 
-  it('should stop iteration on [DONE] signal', async () => {
+  it('should yield [DONE] as ordinary SSE data', async () => {
     const res = createMockResponse([
       'data: chunk1\n\n',
       'data: [DONE]\n\n',
@@ -167,8 +167,32 @@ describe('SSEStream', () => {
       events.push(event);
     }
 
-    expect(events).toHaveLength(1);
-    expect(events[0].data).toBe('chunk1');
+    expect(events.map(event => event.data)).toEqual([
+      'chunk1',
+      '[DONE]',
+      'should-not-appear',
+    ]);
+  });
+
+  it('should cancel the response body when the consumer stops early', async () => {
+    const encoder = new TextEncoder();
+    const cancel = vi.fn();
+    const res = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: first\n\ndata: second\n\n'));
+        },
+        cancel,
+      })
+    );
+    const stream = new SSEStream(...mockStreamArgs(res));
+
+    for await (const event of stream) {
+      expect(event.data).toBe('first');
+      break;
+    }
+
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('should handle data split across chunks', async () => {
@@ -234,6 +258,21 @@ describe('SSEStream', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].data).toBe('valid');
+  });
+
+  it('should retain id and retry fields without dispatching empty events', async () => {
+    const res = createMockResponse([
+      'id: 42\nretry: 5000\nevent: ignored\nunknown: value\n\n',
+      'data: payload\n\n',
+    ]);
+    const stream = new SSEStream(...mockStreamArgs(res));
+
+    const events: SSEEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([{ data: 'payload', id: '42', retry: 5000 }]);
   });
 
   it('should handle data field with leading space after colon', async () => {

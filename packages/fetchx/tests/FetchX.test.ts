@@ -4,6 +4,7 @@ import {
   FetchXError,
   CancelError,
   HTTPError,
+  NetworkError,
   type TimeoutError,
 } from '../src/types';
 import { FetchXStream } from '../src/stream';
@@ -350,7 +351,13 @@ describe('FetchX', () => {
         })
       );
 
-      const api = createFetchX();
+      const api = createFetchX({
+        sanitizeConfig: true,
+        headers: {
+          Authorization: 'Bearer secret',
+          'x-request-id': 'safe',
+        },
+      });
       try {
         await api.get('/not-found');
         expect.fail('Should have thrown');
@@ -360,6 +367,9 @@ describe('FetchX', () => {
         expect(fetchXError.message).toContain('404');
         expect(fetchXError.code).toBe('ERR_BAD_RESPONSE');
         expect(fetchXError.isAxiosError).toBe(true);
+        expect(fetchXError.config?.headers).toEqual({
+          'x-request-id': 'safe',
+        });
       }
     });
 
@@ -822,8 +832,7 @@ describe('FetchX', () => {
         events.push(event);
       }
 
-      expect(events).toHaveLength(1);
-      expect(events[0].data).toBe('{"msg":"hi"}');
+      expect(events).toEqual([{ data: '{"msg":"hi"}' }, { data: '[DONE]' }]);
     });
 
     it('should parse NDJSON via api.ndjson()', async () => {
@@ -859,12 +868,26 @@ describe('FetchX', () => {
         })
       );
 
-      const api = createFetchX();
+      const api = createFetchX({
+        sanitizeConfig: true,
+        headers: {
+          Authorization: 'Bearer secret',
+          'x-api-key': 'secret',
+        },
+      });
       const error = await api.sse('/chat').catch(value => value as HTTPError);
 
       expect(error).toBeInstanceOf(HTTPError);
       expect(error.status).toBe(401);
       expect(error.response.data).toEqual({ error: 'unauthorized' });
+      expect(error.config?.headers).toEqual({
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      });
+      expect(error.response.config.headers).toEqual({
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      });
     });
 
     it('should leave the response body unlocked when HTTP errors are allowed', async () => {
@@ -903,19 +926,103 @@ describe('FetchX', () => {
             })
         );
 
-        const api = createFetchX();
-        const pending = api.sse('/chat', { connectTimeout: 100 });
-        const assertion = expect(pending).rejects.toMatchObject({
+        const api = createFetchX({
+          sanitizeConfig: true,
+          headers: { Authorization: 'Bearer secret' },
+        });
+        const pending = api
+          .sse('/chat', { connectTimeout: 100 })
+          .catch(error => error as TimeoutError);
+
+        await vi.advanceTimersByTimeAsync(100);
+        const error = await pending;
+        expect(error).toMatchObject({
           name: 'TimeoutError',
           timeout: 100,
           phase: 'connect',
         } satisfies Partial<TimeoutError>);
-
-        await vi.advanceTimersByTimeAsync(100);
-        await assertion;
+        expect(error.config?.headers).toEqual({
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        });
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('should not fetch when the signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const api = createFetchX({
+        sanitizeConfig: true,
+        headers: { Authorization: 'Bearer secret' },
+      });
+
+      const error = await api
+        .sse('/chat', { signal: controller.signal })
+        .catch(value => value as CancelError);
+
+      expect(error).toBeInstanceOf(CancelError);
+      expect(error.config?.headers).toEqual({
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      });
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should sanitize config on streaming network errors', async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
+      const api = createFetchX({
+        sanitizeConfig: true,
+        headers: {
+          Authorization: 'Bearer secret',
+          'x-api-key': 'secret',
+          'x-request-id': 'safe',
+        },
+      });
+
+      const error = await api
+        .sse('/chat')
+        .catch(value => value as NetworkError);
+
+      expect(error).toBeInstanceOf(NetworkError);
+      expect(error.config?.headers).toEqual({
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        'x-request-id': 'safe',
+      });
+    });
+
+    it('should preserve SSE defaults when custom headers are provided', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody([]), { status: 200 })
+      );
+      const api = createFetchX();
+
+      await api.sse('/chat', {
+        headers: { Authorization: 'Bearer token' },
+      });
+
+      const headers = new Headers(mockFetch.mock.calls[0][1].headers);
+      expect(headers.get('accept')).toBe('text/event-stream');
+      expect(headers.get('content-type')).toBe('application/json');
+      expect(headers.get('authorization')).toBe('Bearer token');
+    });
+
+    it('should use paramsSerializer for streaming URLs', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody([]), { status: 200 })
+      );
+      const api = createFetchX({ baseURL: 'https://api.example.com' });
+
+      await api.sse('/chat', {
+        params: { signature: 'ignored' },
+        paramsSerializer: () => 'signature=custom%2Bvalue',
+      });
+
+      expect(mockFetch.mock.calls[0][0]).toBe(
+        'https://api.example.com/chat?signature=custom%2Bvalue'
+      );
     });
   });
 });

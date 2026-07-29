@@ -235,6 +235,15 @@ function sanitizeHeaders(
   return result;
 }
 
+/**
+ * Return the config shape that is safe to expose through responses and errors.
+ */
+export function sanitizeRequestConfig(config: RequestOptions): RequestOptions {
+  return config.sanitizeConfig
+    ? { ...config, headers: sanitizeHeaders(config.headers) }
+    : config;
+}
+
 export function buildFetchXResponse<T = unknown>(
   data: T,
   response: Response,
@@ -245,9 +254,7 @@ export function buildFetchXResponse<T = unknown>(
     status: response.status,
     statusText: response.statusText,
     headers: response.headers,
-    config: config.sanitizeConfig
-      ? { ...config, headers: sanitizeHeaders(config.headers) }
-      : config,
+    config: sanitizeRequestConfig(config),
   };
 }
 

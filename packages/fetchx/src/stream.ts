@@ -25,6 +25,8 @@ export interface SSEEvent {
 
 class SSEParser {
   private buffer = '';
+  private lastEventId: string | undefined;
+  private reconnectionTime: number | undefined;
 
   /**
    * Feed a chunk of text into the parser. Returns all complete SSE events
@@ -67,14 +69,14 @@ class SSEParser {
   }
 
   private parseEvent(raw: string): SSEEvent | null {
-    const event: SSEEvent = { data: '' };
-    let hasField = false;
+    const data: string[] = [];
+    let eventType: string | undefined;
+    let hasDataField = false;
 
     for (const line of raw.split(/\r\n|\r|\n/)) {
       // Lines starting with ':' are comments (skip)
       if (!line || line.startsWith(':')) continue;
 
-      hasField = true;
       const colonIdx = line.indexOf(':');
       const field = colonIdx === -1 ? line : line.slice(0, colonIdx);
       const value =
@@ -82,19 +84,22 @@ class SSEParser {
 
       switch (field) {
         case 'data':
-          event.data = event.data ? `${event.data}\n${value}` : value;
+          hasDataField = true;
+          data.push(value);
           break;
         case 'event':
-          event.event = value;
+          eventType = value || undefined;
           break;
         case 'id':
-          event.id = value;
-
-          value; // id with empty value resets
+          // Null characters make an id field invalid per the SSE specification.
+          if (!value.includes('\0')) {
+            this.lastEventId = value;
+          }
           break;
         case 'retry': {
-          const ms = parseInt(value, 10);
-          if (!isNaN(ms)) event.retry = ms;
+          if (/^\d+$/.test(value)) {
+            this.reconnectionTime = parseInt(value, 10);
+          }
           break;
         }
         default:
@@ -103,8 +108,16 @@ class SSEParser {
       }
     }
 
-    // Dispatch event only if it has data or an explicit event type
-    return hasField ? event : null;
+    if (!hasDataField) return null;
+
+    return {
+      data: data.join('\n'),
+      ...(eventType ? { event: eventType } : {}),
+      ...(this.lastEventId !== undefined ? { id: this.lastEventId } : {}),
+      ...(this.reconnectionTime !== undefined
+        ? { retry: this.reconnectionTime }
+        : {}),
+    };
   }
 }
 
@@ -245,6 +258,21 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
     this.detachExternalSignal();
   }
 
+  /**
+   * Cancel an unfinished body before releasing its reader, so early iteration
+   * exits do not leave the underlying request running.
+   */
+  protected async finalizeReader(cancelPending: boolean): Promise<void> {
+    if (cancelPending && this.reader) {
+      try {
+        await this.reader.cancel();
+      } catch {
+        // already canceled
+      }
+    }
+    this.releaseReader();
+  }
+
   abstract [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
@@ -254,14 +282,18 @@ export abstract class FetchXStream<T> implements AsyncIterable<T> {
 
 export class Uint8ArrayStream extends FetchXStream<Uint8Array> {
   async *[Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+    let completed = false;
     try {
       while (true) {
         const { done, value } = await this.readChunk();
-        if (done) break;
+        if (done) {
+          completed = true;
+          break;
+        }
         yield value;
       }
     } finally {
-      this.releaseReader();
+      await this.finalizeReader(!completed);
     }
   }
 }
@@ -274,15 +306,18 @@ export class SSEStream extends FetchXStream<SSEEvent> {
   async *[Symbol.asyncIterator](): AsyncIterator<SSEEvent> {
     const parser = new SSEParser();
     const decoder = new TextDecoder();
+    let completed = false;
 
     try {
       while (true) {
         const { done, value } = await this.readChunk();
-        if (done) break;
+        if (done) {
+          completed = true;
+          break;
+        }
 
         const text = decoder.decode(value, { stream: true });
         for (const event of parser.push(text)) {
-          if (event.data === '[DONE]') return;
           yield event;
         }
       }
@@ -290,17 +325,16 @@ export class SSEStream extends FetchXStream<SSEEvent> {
       // Flush final decoder state
       const final = decoder.decode();
       for (const event of parser.push(final)) {
-        if (event.data === '[DONE]') return;
         yield event;
       }
 
       // Flush remaining parser buffer
       const flushed = parser.flush();
-      if (flushed && flushed.data !== '[DONE]') {
+      if (flushed) {
         yield flushed;
       }
     } finally {
-      this.releaseReader();
+      await this.finalizeReader(!completed);
     }
   }
 }
@@ -313,11 +347,15 @@ export class NDJSONStream<T = unknown> extends FetchXStream<T> {
   async *[Symbol.asyncIterator](): AsyncIterator<T> {
     const decoder = new TextDecoder();
     let buffer = '';
+    let completed = false;
 
     try {
       while (true) {
         const { done, value } = await this.readChunk();
-        if (done) break;
+        if (done) {
+          completed = true;
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -345,7 +383,7 @@ export class NDJSONStream<T = unknown> extends FetchXStream<T> {
         }
       }
     } finally {
-      this.releaseReader();
+      await this.finalizeReader(!completed);
     }
   }
 }
