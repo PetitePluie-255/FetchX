@@ -44,7 +44,7 @@
     "node": ">=18"
   },
   "peerDependencies": {
-    "@petite-pluie/fetchx": ">=0.1.0",
+    "@petite-pluie/fetchx": ">=0.3.0",
     "typescript": ">=4.9.0"
   },
   "devDependencies": {
