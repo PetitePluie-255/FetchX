@@ -122,6 +122,8 @@ export function mergeConfig(
 ): RequestOptions {
   return {
     baseURL: instanceConfig.baseURL,
+    requestExecutor:
+      requestOptions.requestExecutor ?? instanceConfig.requestExecutor,
     timeout: requestOptions.timeout ?? instanceConfig.timeout,
     connectTimeout:
       requestOptions.connectTimeout ?? instanceConfig.connectTimeout,

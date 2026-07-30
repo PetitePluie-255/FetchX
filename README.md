@@ -103,6 +103,12 @@ const api = createFetchX({
   sanitizeConfig: true, // 脱敏 config.headers（authorization 等）
 });
 
+// Electron、自定义网络栈或测试环境可以注入兼容 fetch 的执行器
+const electronApi = createFetchX({
+  requestExecutor: (input, init) =>
+    electronSession.fetch(input, init),
+});
+
 ### `validateStatus` — 自定义成功判定
 
 默认将 2xx 视为成功。可通过 `validateStatus` 自定义判定逻辑：
@@ -647,6 +653,7 @@ function createFetchX<T = unknown>(config?: FetchXConfig): FetchXInstance<T>;
 | `throwHttpErrors`    | `boolean`                                                               | 状态校验失败时抛 HTTPError |
 | `signal`             | `AbortSignal`                                                           | 取消信号                   |
 | `baseURL`            | `string`                                                                | 覆盖实例的 baseURL         |
+| `requestExecutor`    | `RequestExecutor`                                                       | 自定义 HTTP 请求执行器     |
 | `credentials`        | `RequestCredentials`                                                    | 凭证模式                   |
 | `validateStatus`     | `(status: number) => boolean`                                           | 自定义成功状态码判定       |
 | `responseType`       | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData' \| 'stream'` | 强制响应解析类型           |

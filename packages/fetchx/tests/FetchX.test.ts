@@ -58,6 +58,87 @@ describe('FetchX', () => {
     });
   });
 
+  describe('requestExecutor', () => {
+    it('should use an instance-level executor for regular requests', async () => {
+      const controller = new AbortController();
+      const executor = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ source: 'custom' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+      const api = createFetchX({ requestExecutor: executor });
+
+      const result = await api.get('/custom', {
+        signal: controller.signal,
+      });
+
+      expect(result.data).toEqual({ source: 'custom' });
+      expect(executor).toHaveBeenCalledWith(
+        '/custom',
+        expect.objectContaining({
+          method: 'GET',
+          signal: controller.signal,
+        })
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should allow a request-level executor to override the instance', async () => {
+      const instanceExecutor = vi.fn();
+      const requestExecutor = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ source: 'request' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+      const api = createFetchX({ requestExecutor: instanceExecutor });
+
+      const result = await api.get('/override', { requestExecutor });
+
+      expect(result.data).toEqual({ source: 'request' });
+      expect(requestExecutor).toHaveBeenCalledOnce();
+      expect(instanceExecutor).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should use the configured executor for streaming requests', async () => {
+      const executor = vi.fn().mockResolvedValue(
+        new Response(mockStreamBody(['data: custom\n\n']), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      );
+      const api = createFetchX({ requestExecutor: executor });
+
+      const stream = await api.sse('/stream');
+      const events: Array<{ data: string }> = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([{ data: 'custom' }]);
+      expect(executor).toHaveBeenCalledWith(
+        '/stream',
+        expect.objectContaining({
+          method: 'POST',
+          signal: expect.any(AbortSignal),
+        })
+      );
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should map executor failures through the existing error pipeline', async () => {
+      const executor = vi
+        .fn()
+        .mockRejectedValue(new TypeError('Failed to fetch'));
+      const api = createFetchX({ requestExecutor: executor });
+
+      await expect(api.get('/failure')).rejects.toBeInstanceOf(NetworkError);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('GET', () => {
     it('should make a GET request and return data', async () => {
       const mockData = { id: 1, name: 'Test' };

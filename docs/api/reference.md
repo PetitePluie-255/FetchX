@@ -56,8 +56,14 @@ interface FetchXResponse<T = unknown> {
 ## FetchXConfig
 
 ```typescript
+type RequestExecutor = (
+  input: RequestInfo | URL,
+  init?: RequestInit
+) => Promise<Response>;
+
 interface FetchXConfig {
   baseURL?: string;
+  requestExecutor?: RequestExecutor;
   timeout?: number;
   connectTimeout?: number;
   idleTimeout?: number;

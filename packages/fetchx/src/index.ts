@@ -21,6 +21,7 @@ export type {
   FetchXResponse,
   RequestOptions,
   RequestInterceptor,
+  RequestExecutor,
   ResponseInterceptor,
   HttpMethod,
   ResponseType,

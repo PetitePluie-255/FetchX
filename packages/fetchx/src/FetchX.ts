@@ -293,8 +293,11 @@ export class FetchX {
               );
               duplex = d;
 
-              // Execute fetch
-              const rawResponse = await fetch(fullURL, {
+              // Execute request through the configured transport.
+              const requestExecutor =
+                processedConfig.requestExecutor ??
+                globalThis.fetch.bind(globalThis);
+              const rawResponse = await requestExecutor(fullURL, {
                 method: processedConfig.method ?? method,
                 headers,
                 body: uploadBody as BodyInit | undefined,
@@ -608,7 +611,9 @@ export class FetchX {
     userSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
     try {
-      const response = await fetch(fullURL, {
+      const requestExecutor =
+        processedConfig.requestExecutor ?? globalThis.fetch.bind(globalThis);
+      const response = await requestExecutor(fullURL, {
         method: processedConfig.method ?? method,
         headers,
         body: uploadBody as BodyInit | undefined,

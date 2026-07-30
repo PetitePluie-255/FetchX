@@ -15,6 +15,7 @@
 | `throwHttpErrors`    | `boolean`                                                               | 状态校验失败时抛 HTTPError |
 | `signal`             | `AbortSignal`                                                           | 取消信号                   |
 | `baseURL`            | `string`                                                                | 覆盖实例的 baseURL         |
+| `requestExecutor`    | `RequestExecutor`                                                       | 自定义 HTTP 请求执行器     |
 | `credentials`        | `RequestCredentials`                                                    | 凭证模式                   |
 | `validateStatus`     | `(status: number) => boolean`                                           | 自定义成功状态码判定       |
 | `responseType`       | `'json' \| 'text' \| 'blob' \| 'arrayBuffer' \| 'formData' \| 'stream'` | 强制响应解析类型           |
@@ -27,6 +28,10 @@
 | `plugins`            | `Plugin[]`                                                              | 请求级插件                 |
 | `onDownloadProgress` | `(e: ProgressEvent) => void`                                            | 下载进度回调               |
 | `onUploadProgress`   | `(e: ProgressEvent) => void`                                            | 上传进度回调               |
+
+`requestExecutor` 可在实例或单次请求中配置，用于接入 Electron 网络栈、系统代理
+或测试替身。执行器接收完整 URL 和 `RequestInit`，必须返回标准 `Response`，
+并正确处理其中的 `AbortSignal`。
 
 ## 配置优先级
 

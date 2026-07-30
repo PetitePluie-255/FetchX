@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Add an injectable `RequestExecutor` for custom HTTP transports, Electron network stacks, and integration tests.
+
 ## 0.2.1 (2026-07-29)
 
 ### Fixed

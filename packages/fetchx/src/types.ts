@@ -10,6 +10,14 @@ import type { FetchXStream, SSEEvent } from './stream';
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
 
 /**
+ * Executes an HTTP request and returns a standards-compatible Response.
+ */
+export type RequestExecutor = (
+  _input: RequestInfo | URL,
+  _init?: RequestInit
+) => Promise<Response>;
+
+/**
  * Response type for forced parsing (overrides Content-Type detection)
  */
 export type ResponseType =
@@ -63,6 +71,8 @@ export interface CacheConfig {
 export interface FetchXConfig {
   baseURL?: string;
   headers?: Record<string, string>;
+  /** Custom HTTP request executor. Defaults to globalThis.fetch. */
+  requestExecutor?: RequestExecutor;
   /** Request timeout in ms. Used as the stream connection timeout fallback. */
   timeout?: number;
   /** Streaming connection timeout in ms. Covers waiting for response headers. */
