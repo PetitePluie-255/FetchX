@@ -1,6 +1,6 @@
 {
   "name": "@petite-pluie/fetchx-logger",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Logger plugin for FetchX HTTP client — request/response/error logging with timing and filters",
   "repository": {
     "type": "git",
