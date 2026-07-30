@@ -33,6 +33,6 @@ export type {
   PluginContext,
 } from './types';
 export { FetchXStream } from './stream';
-export type { SSEEvent } from './stream';
+export type { SSEEvent, StreamEndReason } from './stream';
 
 export { default } from './FetchX';

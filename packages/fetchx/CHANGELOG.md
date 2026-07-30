@@ -5,6 +5,12 @@
 ### Features
 
 - Add an injectable `RequestExecutor` for custom HTTP transports, Electron network stacks, and integration tests.
+- Add `onStreamEnd` and `onStreamError` plugin hooks for terminal stream lifecycle events.
+
+### Fixed
+
+- Classify custom abort reasons as cancellation by checking the active signal state.
+- Merge request headers case-insensitively across defaults, request options, and interceptors.
 
 ## 0.2.1 (2026-07-29)
 

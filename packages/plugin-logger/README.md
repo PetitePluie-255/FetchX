@@ -36,6 +36,8 @@ api.use(createLoggerPlugin());
 ✓ 200 https://api.example.com/users (42ms)
 ```
 
+流式请求会在自然完成、取消、连接失败或消费失败时记录终态和总耗时。
+
 ## 选项
 
 ```typescript

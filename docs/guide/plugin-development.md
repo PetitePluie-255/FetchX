@@ -4,13 +4,15 @@ FetchX 内置插件系统，通过 `api.use(plugin)` 注册。
 
 ## 插件钩子
 
-| 钩子         | 触发时机                 | 用途             |
-| ------------ | ------------------------ | ---------------- |
-| `onInit`     | 注册插件时               | 初始化、注入能力 |
-| `onRequest`  | 请求发出前（拦截器之后） | 修改配置、添加头 |
-| `onResponse` | 收到响应后               | 响应变换、埋点   |
-| `onError`    | 请求出错时               | 错误上报、恢复   |
-| `onStream`   | 流式请求建立时           | 流式数据转换     |
+| 钩子            | 触发时机                 | 用途               |
+| --------------- | ------------------------ | ------------------ |
+| `onInit`        | 注册插件时               | 初始化、注入能力   |
+| `onRequest`     | 请求发出前（拦截器之后） | 修改配置、添加头   |
+| `onResponse`    | 收到响应后               | 响应变换、埋点     |
+| `onError`       | 请求出错时               | 错误上报、恢复     |
+| `onStream`      | 流式请求建立时           | 流式数据转换       |
+| `onStreamEnd`   | 流自然完成或被取消时     | 清理资源、记录耗时 |
+| `onStreamError` | 流建立或消费失败时       | 流错误上报         |
 
 ## 基本插件
 
@@ -103,5 +105,19 @@ interface Plugin {
     stream: FetchXStream<unknown>,
     context: PluginContext
   ) => FetchXStream<unknown> | Promise<FetchXStream<unknown>>;
+  onStreamEnd?: (
+    stream: FetchXStream<unknown>,
+    reason: 'complete' | 'cancelled',
+    context: PluginContext
+  ) => void | Promise<void>;
+  onStreamError?: (
+    error: unknown,
+    stream: FetchXStream<unknown> | undefined,
+    context: PluginContext
+  ) => void | Promise<void>;
 }
 ```
+
+`onStreamEnd` 对自然读完传入 `complete`，对提前退出迭代或显式
+`stream.abort()` 传入 `cancelled`。连接建立前失败时
+`onStreamError` 的 `stream` 为 `undefined`。

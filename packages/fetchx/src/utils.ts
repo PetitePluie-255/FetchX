@@ -114,6 +114,33 @@ export function createFetchXError(
 }
 
 /**
+ * Merge header records case-insensitively while preserving the winning key's
+ * spelling. Later sources override earlier sources.
+ */
+export function mergeHeaders(
+  ...sources: Array<Readonly<Record<string, string>> | undefined>
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  const keys = new Map<string, string>();
+
+  for (const source of sources) {
+    if (!source) continue;
+
+    for (const [key, value] of Object.entries(source)) {
+      const normalizedKey = key.toLowerCase();
+      const previousKey = keys.get(normalizedKey);
+      if (previousKey !== undefined) {
+        delete result[previousKey];
+      }
+      result[key] = value;
+      keys.set(normalizedKey, key);
+    }
+  }
+
+  return result;
+}
+
+/**
  * Merge instance-level config with per-request options
  */
 export function mergeConfig(
@@ -142,10 +169,7 @@ export function mergeConfig(
     sanitizeConfig:
       requestOptions.sanitizeConfig ?? instanceConfig.sanitizeConfig,
     ...requestOptions,
-    headers: {
-      ...instanceConfig.headers,
-      ...requestOptions.headers,
-    },
+    headers: mergeHeaders(instanceConfig.headers, requestOptions.headers),
   };
 }
 

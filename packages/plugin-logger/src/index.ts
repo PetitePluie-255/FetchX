@@ -1,9 +1,10 @@
-import type {
-  Plugin,
-  PluginContext,
-  RequestOptions,
-  FetchXResponse,
+import {
   FetchXError,
+  type FetchXStream,
+  type Plugin,
+  type PluginContext,
+  type RequestOptions,
+  type FetchXResponse,
 } from '@petite-pluie/fetchx';
 
 export interface LoggerPluginOptions {
@@ -59,11 +60,29 @@ export function createLoggerPlugin(options: LoggerPluginOptions = {}): Plugin {
   const startTimes = new Map<number, number>();
 
   function formatTiming(id: number | undefined): string {
-    if (!logTiming || id === undefined) return '';
+    if (id === undefined) return '';
     const start = startTimes.get(id);
     if (start === undefined) return '';
     startTimes.delete(id);
+    if (!logTiming) return '';
     return ` (${(globalThis.performance.now() - start).toFixed(0)}ms)`;
+  }
+
+  function getLoggerId(config: RequestOptions): number | undefined {
+    return (config as Record<string, unknown>).__loggerId as number | undefined;
+  }
+
+  function formatError(error: unknown): { code: string; message: string } {
+    if (error instanceof FetchXError) {
+      return {
+        code: error.code ?? 'UNKNOWN',
+        message: error.message,
+      };
+    }
+    if (error instanceof Error) {
+      return { code: error.name || 'UNKNOWN', message: error.message };
+    }
+    return { code: 'UNKNOWN', message: String(error) };
   }
 
   return {
@@ -84,17 +103,13 @@ export function createLoggerPlugin(options: LoggerPluginOptions = {}): Plugin {
     },
 
     onResponse: (response, context) => {
+      const timing = formatTiming(getLoggerId(response.config));
       if (
         !logResponse ||
         options.filterResponse?.(response, context) === false
       ) {
         return response;
       }
-
-      const id = (response.config as Record<string, unknown>).__loggerId as
-        | number
-        | undefined;
-      const timing = formatTiming(id);
 
       const statusLabel =
         response.status >= 400 ? '✗' : response.status >= 300 ? '→' : '✓';
@@ -104,19 +119,57 @@ export function createLoggerPlugin(options: LoggerPluginOptions = {}): Plugin {
     },
 
     onError: (error, context) => {
+      const timing = formatTiming(getLoggerId(error.config ?? {}));
       if (!logError || options.filterError?.(error, context) === false) {
         return null;
       }
-
-      const id = (error.config as Record<string, unknown>).__loggerId as
-        | number
-        | undefined;
-      const timing = formatTiming(id);
 
       log(
         `✗ ${error.code ?? 'UNKNOWN'} ${context.method} ${context.url}: ${error.message}${timing}`
       );
       return null;
+    },
+
+    onStreamEnd: (stream: FetchXStream<unknown>, reason, context): void => {
+      const response = stream.meta;
+      const timing = formatTiming(getLoggerId(response.config));
+
+      if (reason === 'cancelled') {
+        if (logError) {
+          log(
+            `✗ ERR_CANCELED ${context.method} ${context.url}: Stream canceled${timing}`
+          );
+        }
+        return;
+      }
+
+      if (
+        logResponse &&
+        options.filterResponse?.(response, context) !== false
+      ) {
+        log(`✓ ${response.status} ${context.url}${timing}`);
+      }
+    },
+
+    onStreamError: (error, stream, context): void => {
+      const config =
+        stream?.meta.config ??
+        (error instanceof FetchXError ? error.config : undefined) ??
+        {};
+      const timing = formatTiming(getLoggerId(config));
+
+      if (
+        !logError ||
+        (error instanceof FetchXError &&
+          options.filterError?.(error, context) === false)
+      ) {
+        return;
+      }
+
+      const details = formatError(error);
+      log(
+        `✗ ${details.code} ${context.method} ${context.url}: ${details.message}${timing}`
+      );
     },
   };
 }

@@ -14,6 +14,21 @@ function mockJSON(
   });
 }
 
+function mockStream(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+        }
+        controller.close();
+      },
+    }),
+    { status: 200 }
+  );
+}
+
 describe('fetchx-logger', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -162,6 +177,73 @@ describe('fetchx-logger', () => {
       await expect(api.get('/fail')).rejects.toThrow();
 
       expect(logFn).not.toHaveBeenCalledWith(expect.stringContaining('✗'));
+    });
+  });
+
+  describe('stream logging', () => {
+    it('should log stream completion with timing', async () => {
+      const logFn = vi.fn();
+      const api = createFetchX({ baseURL: 'https://example.com' });
+      api.use(createLoggerPlugin({ log: logFn }));
+      fetchSpy.mockResolvedValue(mockStream(['data: value\n\n']));
+
+      for await (const event of await api.sse('/chat')) {
+        void event;
+      }
+
+      expect(logFn).toHaveBeenCalledWith(
+        expect.stringMatching(/^✓ 200 \/chat \(\d+ms\)$/u)
+      );
+    });
+
+    it('should log stream connection errors with timing', async () => {
+      const logFn = vi.fn();
+      const api = createFetchX({ baseURL: 'https://example.com' });
+      api.use(createLoggerPlugin({ log: logFn }));
+      fetchSpy.mockRejectedValue(new TypeError('fetch failed'));
+
+      await expect(api.sse('/chat')).rejects.toThrow('Network Error');
+
+      expect(logFn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^✗ ERR_NETWORK POST https:\/\/example\.com\/chat: Network Error \(\d+ms\)$/u
+        )
+      );
+    });
+
+    it('should log stream cancellation once', async () => {
+      const logFn = vi.fn();
+      const api = createFetchX();
+      api.use(createLoggerPlugin({ log: logFn }));
+      fetchSpy.mockResolvedValue(mockStream(['chunk']));
+
+      const stream = await api.stream('/download');
+      stream.abort();
+      stream.abort();
+      await Promise.resolve();
+
+      expect(
+        logFn.mock.calls.filter(([message]) =>
+          String(message).includes('ERR_CANCELED')
+        )
+      ).toHaveLength(1);
+    });
+
+    it('should log stream parsing errors with timing', async () => {
+      const logFn = vi.fn();
+      const api = createFetchX();
+      api.use(createLoggerPlugin({ log: logFn }));
+      fetchSpy.mockResolvedValue(mockStream(['not-json\n']));
+
+      await expect(async () => {
+        for await (const entry of await api.ndjson('/logs')) {
+          void entry;
+        }
+      }).rejects.toBeInstanceOf(SyntaxError);
+
+      expect(logFn).toHaveBeenCalledWith(
+        expect.stringMatching(/^✗ SyntaxError GET \/logs: .+ \(\d+ms\)$/u)
+      );
     });
   });
 

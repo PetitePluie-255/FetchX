@@ -420,6 +420,28 @@ describe('FetchX', () => {
 
       await expect(promise).rejects.toThrow('Request canceled');
     });
+
+    it('should classify a custom abort reason as CancelError', async () => {
+      const controller = new AbortController();
+      const api = createFetchX();
+
+      mockFetch.mockImplementationOnce(
+        (_url: string, options?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(options.signal?.reason),
+              { once: true }
+            );
+          })
+      );
+
+      const pending = api.get('/test', { signal: controller.signal });
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledOnce());
+      controller.abort(new Error('user stop'));
+
+      await expect(pending).rejects.toBeInstanceOf(CancelError);
+    });
   });
 
   describe('error handling', () => {
@@ -844,6 +866,177 @@ describe('FetchX', () => {
   });
 
   describe('streaming', () => {
+    it.each([
+      {
+        name: 'raw',
+        body: ['chunk'],
+        consume: async (api: ReturnType<typeof createFetchX>) => {
+          for await (const chunk of await api.stream('/stream')) {
+            void chunk;
+          }
+        },
+      },
+      {
+        name: 'SSE',
+        body: ['data: value\n\n'],
+        consume: async (api: ReturnType<typeof createFetchX>) => {
+          for await (const event of await api.sse('/stream')) {
+            void event;
+          }
+        },
+      },
+      {
+        name: 'NDJSON',
+        body: ['{"value":1}\n'],
+        consume: async (api: ReturnType<typeof createFetchX>) => {
+          for await (const entry of await api.ndjson('/stream')) {
+            void entry;
+          }
+        },
+      },
+    ])('should report $name completion once', async ({ body, consume }) => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(body), { status: 200 })
+      );
+      const onStreamEnd = vi.fn();
+      const onStreamError = vi.fn();
+      const api = createFetchX();
+      api.use({ name: 'lifecycle', onStreamEnd, onStreamError });
+
+      await consume(api);
+
+      expect(onStreamEnd).toHaveBeenCalledOnce();
+      expect(onStreamEnd.mock.calls[0][1]).toBe('complete');
+      expect(onStreamError).not.toHaveBeenCalled();
+    });
+
+    it('should report early iteration exit as cancellation once', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['first', 'second']), { status: 200 })
+      );
+      const onStreamEnd = vi.fn();
+      const api = createFetchX();
+      api.use({ name: 'lifecycle', onStreamEnd });
+
+      for await (const chunk of await api.stream('/stream')) {
+        void chunk;
+        break;
+      }
+
+      expect(onStreamEnd).toHaveBeenCalledOnce();
+      expect(onStreamEnd.mock.calls[0][1]).toBe('cancelled');
+    });
+
+    it('should report explicit abort as cancellation once', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['chunk']), { status: 200 })
+      );
+      const onStreamEnd = vi.fn();
+      const api = createFetchX();
+      api.use({ name: 'lifecycle', onStreamEnd });
+
+      const stream = await api.stream('/stream');
+      stream.abort();
+      stream.abort();
+      await Promise.resolve();
+
+      expect(onStreamEnd).toHaveBeenCalledOnce();
+      expect(onStreamEnd.mock.calls[0][1]).toBe('cancelled');
+    });
+
+    it('should report stream parsing errors once', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody(['not-json\n']), { status: 200 })
+      );
+      const onStreamEnd = vi.fn();
+      const onStreamError = vi.fn();
+      const api = createFetchX();
+      api.use({ name: 'lifecycle', onStreamEnd, onStreamError });
+
+      const stream = await api.ndjson('/stream');
+      await expect(async () => {
+        for await (const entry of stream) {
+          void entry;
+        }
+      }).rejects.toBeInstanceOf(SyntaxError);
+
+      expect(onStreamError).toHaveBeenCalledOnce();
+      expect(onStreamError.mock.calls[0][0]).toBeInstanceOf(SyntaxError);
+      expect(onStreamError.mock.calls[0][1]).toBe(stream);
+      expect(onStreamEnd).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        name: 'raw',
+        create: (api: ReturnType<typeof createFetchX>) => api.stream('/stream'),
+      },
+      {
+        name: 'SSE',
+        create: (api: ReturnType<typeof createFetchX>) => api.sse('/stream'),
+      },
+      {
+        name: 'NDJSON',
+        create: (api: ReturnType<typeof createFetchX>) => api.ndjson('/stream'),
+      },
+    ])('should report $name read errors once', async ({ create }) => {
+      const readError = new Error('read failed');
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.error(readError);
+            },
+          }),
+          { status: 200 }
+        )
+      );
+      const onStreamEnd = vi.fn();
+      const onStreamError = vi.fn();
+      const api = createFetchX();
+      api.use({ name: 'lifecycle', onStreamEnd, onStreamError });
+
+      const stream = await create(api);
+      await expect(async () => {
+        for await (const value of stream) {
+          void value;
+        }
+      }).rejects.toThrow('read failed');
+
+      expect(onStreamError).toHaveBeenCalledOnce();
+      expect(onStreamError.mock.calls[0][0]).toBe(readError);
+      expect(onStreamEnd).not.toHaveBeenCalled();
+    });
+
+    it('should report errors thrown by onStream plugins', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody([]), { status: 200 })
+      );
+      const pluginError = new Error('stream plugin failed');
+      const onStreamError = vi.fn();
+      const api = createFetchX();
+      api.use({
+        name: 'observer',
+        priority: 0,
+        onStreamError,
+      });
+      api.use({
+        name: 'failing',
+        priority: 1,
+        onStream: () => {
+          throw pluginError;
+        },
+      });
+
+      await expect(api.stream('/stream')).rejects.toBe(pluginError);
+      expect(onStreamError).toHaveBeenCalledOnce();
+      expect(onStreamError.mock.calls[0]).toEqual([
+        pluginError,
+        expect.any(FetchXStream),
+        expect.objectContaining({ url: '/stream', method: 'GET' }),
+      ]);
+    });
+
     it('should return ReadableStream for responseType: "stream"', async () => {
       mockFetch.mockResolvedValueOnce(
         new Response(mockStreamBody(['hello', 'world']), {
@@ -1074,6 +1267,40 @@ describe('FetchX', () => {
       });
     });
 
+    it('should notify plugins when stream connection fails', async () => {
+      mockFetch.mockRejectedValueOnce(new TypeError('fetch failed'));
+      const onStreamError = vi.fn();
+      const api = createFetchX();
+      api.use({ name: 'lifecycle', onStreamError });
+
+      await expect(api.sse('/chat')).rejects.toBeInstanceOf(NetworkError);
+
+      expect(onStreamError).toHaveBeenCalledOnce();
+      expect(onStreamError.mock.calls[0][0]).toBeInstanceOf(NetworkError);
+      expect(onStreamError.mock.calls[0][1]).toBeUndefined();
+    });
+
+    it('should classify a custom stream abort reason as CancelError', async () => {
+      const controller = new AbortController();
+      const executor = vi.fn(
+        (_url: RequestInfo | URL, options?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(options.signal?.reason),
+              { once: true }
+            );
+          })
+      );
+      const api = createFetchX({ requestExecutor: executor });
+
+      const pending = api.sse('/chat', { signal: controller.signal });
+      await vi.waitFor(() => expect(executor).toHaveBeenCalledOnce());
+      controller.abort(new Error('user stop'));
+
+      await expect(pending).rejects.toBeInstanceOf(CancelError);
+    });
+
     it('should preserve SSE defaults when custom headers are provided', async () => {
       mockFetch.mockResolvedValueOnce(
         new Response(mockStreamBody([]), { status: 200 })
@@ -1088,6 +1315,51 @@ describe('FetchX', () => {
       expect(headers.get('accept')).toBe('text/event-stream');
       expect(headers.get('content-type')).toBe('application/json');
       expect(headers.get('authorization')).toBe('Bearer token');
+    });
+
+    it('should override SSE defaults case-insensitively', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody([]), { status: 200 })
+      );
+      const api = createFetchX({
+        headers: { Authorization: 'Bearer instance' },
+      });
+
+      await api.sse('/chat', {
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/custom',
+          authorization: 'Bearer request',
+        },
+      });
+
+      const headers = new Headers(mockFetch.mock.calls[0][1].headers);
+      expect([...headers.entries()]).toEqual([
+        ['accept', 'application/json'],
+        ['authorization', 'Bearer request'],
+        ['content-type', 'application/custom'],
+      ]);
+    });
+
+    it('should normalize duplicate header casing added by interceptors', async () => {
+      mockFetch.mockResolvedValueOnce(
+        new Response(mockStreamBody([]), { status: 200 })
+      );
+      const api = createFetchX({
+        headers: { Authorization: 'Bearer instance' },
+      });
+      api.interceptors.request.use(config => ({
+        ...config,
+        headers: {
+          ...config.headers,
+          authorization: 'Bearer interceptor',
+        },
+      }));
+
+      await api.sse('/chat');
+
+      const headers = new Headers(mockFetch.mock.calls[0][1].headers);
+      expect(headers.get('authorization')).toBe('Bearer interceptor');
     });
 
     it('should use paramsSerializer for streaming URLs', async () => {

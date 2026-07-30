@@ -19,6 +19,79 @@ export interface SSEEvent {
   retry?: number;
 }
 
+export type StreamEndReason = 'complete' | 'cancelled';
+
+interface StreamLifecycleCallbacks<T extends FetchXStream<unknown>> {
+  onEnd: (_stream: T, _reason: StreamEndReason) => void | Promise<void>;
+  onError: (_error: unknown, _stream: T) => void | Promise<void>;
+}
+
+/**
+ * Observe a stream without changing its transport or protocol parsing.
+ * The returned proxy settles exactly once across completion, cancellation,
+ * explicit aborts, and iteration errors.
+ */
+export function observeStreamLifecycle<T extends FetchXStream<unknown>>(
+  stream: T,
+  callbacks: StreamLifecycleCallbacks<T>
+): T {
+  let settled = false;
+
+  const settleEnd = async (reason: StreamEndReason): Promise<void> => {
+    if (settled) return;
+    settled = true;
+    await callbacks.onEnd(observed, reason);
+  };
+
+  const settleError = async (error: unknown): Promise<void> => {
+    if (settled) return;
+    settled = true;
+    await callbacks.onError(error, observed);
+  };
+
+  const observed = new Proxy(stream, {
+    get(target, property): unknown {
+      if (property === Symbol.asyncIterator) {
+        return async function* (): AsyncIterator<unknown> {
+          let completed = false;
+          let failed = false;
+
+          try {
+            for await (const value of target) {
+              yield value;
+            }
+            completed = true;
+          } catch (error: unknown) {
+            failed = true;
+            await settleError(error);
+            throw error;
+          } finally {
+            if (!failed) {
+              await settleEnd(completed ? 'complete' : 'cancelled');
+            }
+          }
+        };
+      }
+
+      if (property === 'abort') {
+        return (): void => {
+          target.abort();
+          void settleEnd('cancelled').catch(() => {});
+        };
+      }
+
+      const value = Reflect.get(target, property, target) as unknown;
+      if (typeof value === 'function') {
+        return (...args: unknown[]): unknown =>
+          Reflect.apply(value, target, args) as unknown;
+      }
+      return value;
+    },
+  });
+
+  return observed;
+}
+
 // ──────────────────────────────────────────────
 //  SSE Parser (internal, not exported)
 // ──────────────────────────────────────────────

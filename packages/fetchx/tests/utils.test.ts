@@ -6,6 +6,7 @@ import {
   parseResponse,
   createFetchXError,
   mergeConfig,
+  mergeHeaders,
   isSuccessStatus,
   isCancel,
 } from '../src/utils';
@@ -213,6 +214,28 @@ describe('Utils', () => {
       expect(result.headers).toEqual({ 'Content-Type': 'text/plain' });
     });
 
+    it('should override headers case-insensitively', () => {
+      const result = mergeConfig(
+        {
+          headers: {
+            Authorization: 'Bearer instance',
+            'Content-Type': 'application/json',
+          },
+        },
+        {
+          headers: {
+            authorization: 'Bearer request',
+            'content-type': 'text/plain',
+          },
+        }
+      );
+
+      expect(result.headers).toEqual({
+        authorization: 'Bearer request',
+        'content-type': 'text/plain',
+      });
+    });
+
     it('should use instance baseURL when request does not specify', () => {
       const instance = { baseURL: 'https://api.example.com' };
       const request = {};
@@ -239,6 +262,20 @@ describe('Utils', () => {
       const request = {};
       const result = mergeConfig(instance, request);
       expect(result.credentials).toBe('same-origin');
+    });
+  });
+
+  describe('mergeHeaders', () => {
+    it('should keep only the last value for duplicate header casing', () => {
+      expect(
+        mergeHeaders(
+          { Accept: 'text/event-stream', 'X-Trace': 'instance' },
+          { accept: 'application/json', 'x-trace': 'request' }
+        )
+      ).toEqual({
+        accept: 'application/json',
+        'x-trace': 'request',
+      });
     });
   });
 

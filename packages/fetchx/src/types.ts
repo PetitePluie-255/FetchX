@@ -2,7 +2,7 @@ import type {
   RequestInterceptorManager,
   ResponseInterceptorManager,
 } from './interceptors';
-import type { FetchXStream, SSEEvent } from './stream';
+import type { FetchXStream, SSEEvent, StreamEndReason } from './stream';
 
 /**
  * HTTP method union type
@@ -336,4 +336,16 @@ export interface Plugin {
     _stream: FetchXStream<unknown>,
     _context: PluginContext
   ) => FetchXStream<unknown> | Promise<FetchXStream<unknown>>;
+  /** Called once when a stream completes or is canceled. */
+  onStreamEnd?: (
+    _stream: FetchXStream<unknown>,
+    _reason: StreamEndReason,
+    _context: PluginContext
+  ) => void | Promise<void>;
+  /** Called once when stream creation or consumption fails. */
+  onStreamError?: (
+    _error: unknown,
+    _stream: FetchXStream<unknown> | undefined,
+    _context: PluginContext
+  ) => void | Promise<void>;
 }

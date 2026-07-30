@@ -6,7 +6,11 @@ import type {
   FetchXError,
   FetchXInstance,
 } from './types';
-import type { FetchXStream } from './stream';
+import {
+  observeStreamLifecycle,
+  type FetchXStream,
+  type StreamEndReason,
+} from './stream';
 
 /**
  * Manages plugin registration, lifecycle, and hook dispatch.
@@ -133,11 +137,47 @@ export class PluginManager {
     extra?: Plugin[]
   ): Promise<T> {
     let result: FetchXStream<unknown> = stream;
-    for (const plugin of this.getAll(extra)) {
-      if (plugin.onStream) {
-        result = await plugin.onStream(result, context);
+    try {
+      for (const plugin of this.getAll(extra)) {
+        if (plugin.onStream) {
+          result = await plugin.onStream(result, context);
+        }
       }
+    } catch (error: unknown) {
+      await this.runOnStreamError(error, result, context, extra);
+      throw error;
     }
-    return result as T;
+
+    const observed = result as T;
+    return observeStreamLifecycle(observed, {
+      onEnd: (stream, reason) =>
+        this.runOnStreamEnd(stream, reason, context, extra),
+      onError: (error, stream) =>
+        this.runOnStreamError(error, stream, context, extra),
+    });
+  }
+
+  /** Run stream completion hooks in plugin priority order. */
+  async runOnStreamEnd(
+    stream: FetchXStream<unknown>,
+    reason: StreamEndReason,
+    context: PluginContext,
+    extra?: Plugin[]
+  ): Promise<void> {
+    for (const plugin of this.getAll(extra)) {
+      await plugin.onStreamEnd?.(stream, reason, context);
+    }
+  }
+
+  /** Run stream failure hooks in plugin priority order. */
+  async runOnStreamError(
+    error: unknown,
+    stream: FetchXStream<unknown> | undefined,
+    context: PluginContext,
+    extra?: Plugin[]
+  ): Promise<void> {
+    for (const plugin of this.getAll(extra)) {
+      await plugin.onStreamError?.(error, stream, context);
+    }
   }
 }
