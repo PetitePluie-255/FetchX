@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0](https://github.com/PetitePluie-255/FetchX/compare/fetchx-v0.2.1...fetchx-v0.3.0) (2026-07-30)
+
+### Features
+
+- **fetchx:** support custom request executors ([f7dffc6](https://github.com/PetitePluie-255/FetchX/commit/f7dffc646dce76ee3c3ef3884bcce84bfd1c03c1))
+
+### Bug Fixes
+
+- **fetchx:** complete streaming lifecycle handling ([a684c63](https://github.com/PetitePluie-255/FetchX/commit/a684c63999c38a7de2531a055721454796928880))
+
 ## Unreleased
 
 ### Features
